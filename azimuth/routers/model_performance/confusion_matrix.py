@@ -7,12 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from azimuth.app import get_dataset_split_manager, get_task_manager
 from azimuth.dataset_split_manager import DatasetSplitManager
 from azimuth.task_manager import TaskManager
-from azimuth.types import (
-    DatasetSplitName,
-    ModuleOptions,
-    NamedDatasetFilters,
-    SupportedModule,
-)
+from azimuth.types import DatasetSplitName, ModuleOptions, NamedDatasetFilters, SupportedModule
 from azimuth.types.model_performance import ConfusionMatrixResponse
 from azimuth.utils.routers import (
     build_named_dataset_filters,
@@ -22,14 +17,11 @@ from azimuth.utils.routers import (
 
 router = APIRouter()
 
-TAGS = ["Confusion Matrix v1"]
-
 
 @router.get(
     "",
     summary="Get confusion matrix.",
     description="Get confusion matrix on specified filters.",
-    tags=TAGS,
     response_model=ConfusionMatrixResponse,
 )
 def get_confusion_matrix(

@@ -49,7 +49,21 @@ const Dashboard = () => {
 
   const firstAvailableDatasetSplit = DATASET_SPLIT_NAMES.find(
     (datasetSplitName) => datasetInfo.availableDatasetSplits[datasetSplitName]
-  )!;
+  );
+
+  if (firstAvailableDatasetSplit === undefined) {
+    return (
+      <Box
+        width="100%"
+        height="100%"
+        display="flex"
+        alignItems="center"
+        justifyContent="center"
+      >
+        <Typography>Please set up a dataset</Typography>
+      </Box>
+    );
+  }
 
   return (
     <Box display="flex" flexDirection="column" gap={2}>
@@ -71,7 +85,9 @@ const Dashboard = () => {
           color="secondary"
           variant="contained"
           component={Link}
-          to={`/${jobId}/dataset_splits/${firstAvailableDatasetSplit}/prediction_overview${searchString}`}
+          to={`/${jobId}/dataset_splits/${firstAvailableDatasetSplit}/${
+            isPipelineSelected(pipeline) ? "prediction_overview" : "utterances"
+          }${searchString}`}
           sx={{ gap: 1 }}
         >
           <Telescope fontSize="large" />
@@ -136,32 +152,30 @@ const Dashboard = () => {
           )}
         />
       )}
-      {isPipelineSelected(pipeline) && (
-        <WithDatasetSplitNameState
-          defaultDatasetSplitName={firstAvailableDatasetSplit}
-          render={(datasetSplitName, setDatasetSplitName) => (
-            <PreviewCard
-              title="Smart Tag Analysis"
-              to={`/${jobId}/dataset_splits/${datasetSplitName}/smart_tags${searchString}`}
-              description={smartTagsDescription}
+      <WithDatasetSplitNameState
+        defaultDatasetSplitName={firstAvailableDatasetSplit}
+        render={(datasetSplitName, setDatasetSplitName) => (
+          <PreviewCard
+            title="Smart Tag Analysis"
+            to={`/${jobId}/dataset_splits/${datasetSplitName}/smart_tags${searchString}`}
+            description={smartTagsDescription}
+          >
+            <Box
+              display="flex"
+              flexDirection="column" // Important for the inner Box to overflow correctly
+              maxHeight={DEFAULT_PREVIEW_CONTENT_HEIGHT}
             >
-              <Box
-                display="flex"
-                flexDirection="column" // Important for the inner Box to overflow correctly
-                maxHeight={DEFAULT_PREVIEW_CONTENT_HEIGHT}
-              >
-                <SmartTagsTable
-                  jobId={jobId}
-                  pipeline={pipeline}
-                  availableDatasetSplits={datasetInfo.availableDatasetSplits}
-                  datasetSplitName={datasetSplitName}
-                  setDatasetSplitName={setDatasetSplitName}
-                />
-              </Box>
-            </PreviewCard>
-          )}
-        />
-      )}
+              <SmartTagsTable
+                jobId={jobId}
+                pipeline={pipeline}
+                availableDatasetSplits={datasetInfo.availableDatasetSplits}
+                datasetSplitName={datasetSplitName}
+                setDatasetSplitName={setDatasetSplitName}
+              />
+            </Box>
+          </PreviewCard>
+        )}
+      />
       {isPipelineSelected(pipeline) &&
         datasetInfo.perturbationTestingAvailable && (
           <PreviewCard

@@ -2,6 +2,9 @@
 const express = require("express");
 const app = express();
 const cors = require("cors");
+const fs = require("fs");
+const http = require("http");
+const https = require("https");
 const { createProxyMiddleware } = require("http-proxy-middleware");
 const path = require("path");
 
@@ -17,12 +20,10 @@ app.use(cors(corsConfig));
 app.use(
   "/api/local",
   createProxyMiddleware({
-    pathRewrite: {
-      "^/api/[^/]+/": "/", // rewrite path
-    },
-    target: process.env.REACT_APP_BACKEND_PORT
-      ? `http://host.docker.internal:${process.env.REACT_APP_BACKEND_PORT}`
-      : "http://host.docker.internal:8091",
+    pathRewrite: { "^/api/[^/]+/": "/" },
+    target: `http://${
+      process.env.REACT_APP_BACKEND_HOSTNAME || "host.docker.internal"
+    }:${process.env.REACT_APP_BACKEND_PORT || 8091}`,
     changeOrigin: true,
   })
 );
@@ -45,7 +46,16 @@ app.use((err, req, res, next) => {
 
 const port = process.env.PORT || 8080;
 
-app.server = app.listen(port);
+// We use `||` rather than `&&` so that if one env var is set but not the other (probably a mistake), we error out.
+if (process.env.HTTPS_KEY || process.env.HTTPS_CERT) {
+  const tls = {
+    key: fs.readFileSync(process.env.HTTPS_KEY),
+    cert: fs.readFileSync(process.env.HTTPS_CERT),
+  };
+  https.createServer(tls, app).listen(port);
+} else {
+  http.createServer(app).listen(port);
+}
 console.log(`
 API server listening on port ${port}
 Server PID: ${process.pid}

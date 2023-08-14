@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from glob import glob
 from os.path import join as pjoin
 
@@ -7,14 +8,17 @@ from jsonlines import jsonlines
 from pydantic import ValidationError
 
 from azimuth.config import (
+    ArtifactsConfig,
     AzimuthConfig,
+    AzimuthConfigHistoryWithHash,
     PipelineDefinition,
     SupportedLanguage,
     TemperatureScaling,
     ThresholdConfig,
     config_defaults_per_language,
+    load_azimuth_config,
 )
-from azimuth.utils.project import save_config, update_config
+from azimuth.utils.project import update_config
 
 CURR_PATH = os.path.dirname(os.path.dirname(__file__))
 
@@ -138,26 +142,158 @@ def test_french_defaults_and_override():
     ), "Config did not take default French value for prefix list (neutral tokens)"
 
 
+def test_config_min_max_values():
+    AzimuthConfig(
+        **MINIMAL_CONFIG,
+        pipelines=[{"model": {"class_name": "Cls"}, "postprocessors": [{"temperature": 0}]}],
+    )
+    with pytest.raises(ValidationError):
+        AzimuthConfig(
+            **MINIMAL_CONFIG,
+            pipelines=[{"model": {"class_name": "Cls"}, "postprocessors": [{"temperature": -0.1}]}],
+        )
+
+    AzimuthConfig(
+        **MINIMAL_CONFIG,
+        pipelines=[{"model": {"class_name": "Cls"}, "postprocessors": [{"threshold": 0}]}],
+    )
+    AzimuthConfig(
+        **MINIMAL_CONFIG,
+        pipelines=[{"model": {"class_name": "Cls"}, "postprocessors": [{"threshold": 1}]}],
+    )
+    with pytest.raises(ValidationError):
+        AzimuthConfig(
+            **MINIMAL_CONFIG,
+            pipelines=[{"model": {"class_name": "Cls"}, "postprocessors": [{"threshold": -0.1}]}],
+        )
+    with pytest.raises(ValidationError):
+        AzimuthConfig(
+            **MINIMAL_CONFIG,
+            pipelines=[{"model": {"class_name": "Cls"}, "postprocessors": [{"threshold": 1.1}]}],
+        )
+
+    AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"min_num_per_class": 1})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"min_num_per_class": 0})
+
+    AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"max_delta_class_imbalance": 0})
+    AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"max_delta_class_imbalance": 1})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"max_delta_class_imbalance": -0.1})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"max_delta_class_imbalance": 1.1})
+
+    AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"max_delta_representation": 0})
+    AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"max_delta_representation": 1})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"max_delta_representation": -0.1})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"max_delta_representation": 1.1})
+
+    AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"max_delta_mean_words": 0})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"max_delta_mean_words": -0.1})
+
+    AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"max_delta_std_words": 0})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, dataset_warnings={"max_delta_std_words": -0.1})
+
+    AzimuthConfig(**MINIMAL_CONFIG, syntax={"short_utterance_max_word": 1})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, syntax={"short_utterance_max_word": 0})
+
+    AzimuthConfig(**MINIMAL_CONFIG, syntax={"long_utterance_min_word": 1})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, syntax={"long_utterance_min_word": 0})
+
+    AzimuthConfig(**MINIMAL_CONFIG, similarity={"conflicting_neighbors_threshold": 0})
+    AzimuthConfig(**MINIMAL_CONFIG, similarity={"conflicting_neighbors_threshold": 1})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, similarity={"conflicting_neighbors_threshold": -0.1})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, similarity={"conflicting_neighbors_threshold": 1.1})
+
+    AzimuthConfig(**MINIMAL_CONFIG, similarity={"no_close_threshold": -1})
+    AzimuthConfig(**MINIMAL_CONFIG, similarity={"no_close_threshold": 1})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, similarity={"no_close_threshold": -1.1})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, similarity={"no_close_threshold": 1.1})
+
+    AzimuthConfig(**MINIMAL_CONFIG, uncertainty={"iterations": 1})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, uncertainty={"iterations": 0})
+
+    AzimuthConfig(**MINIMAL_CONFIG, uncertainty={"high_epistemic_threshold": 0})
+    with pytest.raises(ValidationError):
+        AzimuthConfig(**MINIMAL_CONFIG, uncertainty={"high_epistemic_threshold": -0.1})
+
+
 def test_update_config(tiny_text_config, monkeypatch, dask_client):
+    config_history_path = tiny_text_config.get_config_history_path()
+
     # Changing config for a first time
     partial_config = {"similarity": None}
     new_config = update_config(tiny_text_config, partial_config)
     assert not new_config.similarity
-    save_config(new_config)
+    new_config.save()
 
-    with jsonlines.open(f"{new_config.artifact_path}/config_history.jsonl", "r") as reader:
+    with jsonlines.open(config_history_path, "r") as reader:
         all_configs = list(reader)
     assert len(all_configs) == 1
-    assert all_configs[0] == new_config
+    assert all_configs[0]["config"] == new_config
 
     # Changing config for a second time
     partial_config = {"dataset_warnings": {"min_num_per_class": 40}}
     new_config = update_config(new_config, partial_config)
     assert new_config.dataset_warnings.min_num_per_class == 40
-    save_config(new_config)
+    new_config.save()
 
-    with jsonlines.open(f"{new_config.artifact_path}/config_history.jsonl", "r") as reader:
+    with jsonlines.open(config_history_path, "r") as reader:
         all_configs = list(reader)
 
     assert len(all_configs) == 2
-    assert all_configs[-1] == new_config
+    assert all_configs[-1]["config"] == new_config
+
+    assert datetime.fromisoformat(all_configs[-1]["created_on"]) > datetime.fromisoformat(
+        all_configs[0]["created_on"]
+    ), "Second config should be created on after the first one."
+
+
+def test_load_from_config_history(tiny_text_config):
+    # With no config history, the loaded config is the default, not the tiny_text_config.
+    cfg = load_azimuth_config(config_path=None, load_config_history=True)
+    assert cfg == AzimuthConfig()
+
+    # With a config history, the loaded config is the last one from the config history.
+    tiny_text_config.save()
+    os.environ["ARTIFACT_PATH"] = tiny_text_config.artifact_path
+    cfg = load_azimuth_config(config_path=None, load_config_history=True)
+    assert cfg == tiny_text_config
+    del os.environ["ARTIFACT_PATH"]
+
+
+def test_config_history_with_hash():
+    default_config = AzimuthConfigHistoryWithHash(config={})
+
+    specified_hash_ignored = AzimuthConfigHistoryWithHash(config={}, hash="Potato")
+    assert specified_hash_ignored.hash == default_config.hash
+
+    specified_default_value = AzimuthConfigHistoryWithHash(config={"name": "New project"})
+    assert specified_default_value.hash == default_config.hash
+
+    specified_different_value = AzimuthConfigHistoryWithHash(config={"name": "Potato"})
+    assert specified_different_value.hash != default_config.hash
+
+    # Make sure the hash doesn't cause an extra exception if the config has a validation error.
+    with pytest.raises(
+        ValidationError, match="1 validation error for AzimuthConfigHistoryWithHash\nconfig -> name"
+    ):
+        AzimuthConfigHistoryWithHash(config={"name": None})
+
+
+def test_artifact_path_equality():
+    # This is important since we forbid updating the config if the artifact_path differs.
+    default = ArtifactsConfig()
+    assert ArtifactsConfig(artifact_path="cache/../cache") == default
+    assert ArtifactsConfig(artifact_path=f"{os.getcwd()}/cache") == default

@@ -6,9 +6,11 @@ import abc
 import os
 import threading
 import time
+import uuid
+from enum import IntEnum
 from functools import partial
 from os.path import join as pjoin
-from typing import Any, Callable, Dict, Generic, List, Optional, Tuple, TypeVar, cast
+from typing import Any, Callable, Dict, Generic, List, Optional, TypeVar, cast
 
 import structlog
 from datasets import Dataset
@@ -24,6 +26,11 @@ log = structlog.get_logger()
 ConfigScope = TypeVar("ConfigScope", bound=CommonFieldsConfig)
 
 
+class Worker(IntEnum):
+    model = 0
+    encoder = 0
+
+
 class DaskModule(HDF5CacheMixin, Generic[ConfigScope]):
     """Abstract class that define an item of work to be computed on the cluster.
 
@@ -36,6 +43,7 @@ class DaskModule(HDF5CacheMixin, Generic[ConfigScope]):
     """
 
     allowed_splits = {DatasetSplitName.train, DatasetSplitName.eval}
+    worker: Optional[Worker] = None
 
     def __init__(
         self,
@@ -57,7 +65,7 @@ class DaskModule(HDF5CacheMixin, Generic[ConfigScope]):
         self.future: Optional[Future] = None
         self.done_event: Optional[Event] = None
         # We cache the result in a HDF5 file and we have a FileLock.
-        self.cache_dir = pjoin(self.config.get_artifact_path(), self.__class__.__name__)
+        self.cache_dir = pjoin(self.config.get_project_path(), self.__class__.__name__)
         os.makedirs(self.cache_dir, exist_ok=True)
         self._cache_file = pjoin(self.cache_dir, f"{self.name}.h5")
         self._cache_lock = pjoin(self.cache_dir, f"{self.name}.h5.lock")
@@ -78,9 +86,8 @@ class DaskModule(HDF5CacheMixin, Generic[ConfigScope]):
         raise NotImplementedError
 
     @property
-    def task_id(self) -> Tuple[str, int]:
-        indices_hash = hash(tuple(self.get_caching_indices()))
-        return self.name, indices_hash
+    def task_id(self) -> str:
+        return f"{self.name}_{hash(tuple(self.get_caching_indices()))}"
 
     def _get_config_scope(self, config) -> ConfigScope:
         """Get the current config scope from full/partial config."""
@@ -92,7 +99,7 @@ class DaskModule(HDF5CacheMixin, Generic[ConfigScope]):
             scoped_config = config.__class__
         else:
             scoped_config = base.__args__[0]
-        return cast(ConfigScope, scoped_config.parse_obj(config.dict(by_alias=True)))
+        return cast(ConfigScope, scoped_config.parse_obj(config.dict()))
 
     def start_task_on_dataset_split(
         self, client: Client, dependencies: List["DaskModule"] = None
@@ -108,15 +115,17 @@ class DaskModule(HDF5CacheMixin, Generic[ConfigScope]):
 
         """
         log.info(f"Starting {self.name}")
-        deps = [d.done_event for d in dependencies] if dependencies is not None else []
+        deps = [d.done_event for d in dependencies] if dependencies else []
         if not all(deps):
             raise ValueError("Can't wait for an unstarted Module.")
-        self.done_event = Event(name="-".join(map(str, self.task_id)), client=client)
+        self.done_event = Event(name=self.task_id, client=client)
         # pure=false to be sure that everything is rerun.
         self.future = client.submit(
             self._compute_on_dataset_split_with_deps,
             pure=False,
             dependencies=deps,
+            key=f"{self.task_id}_{uuid.uuid4()}",  # Unique identifier
+            workers=self.worker,
         )
         # Tell that this future is used on which indices.
         self.future.indices = self.get_caching_indices()
@@ -128,6 +137,10 @@ class DaskModule(HDF5CacheMixin, Generic[ConfigScope]):
         th.setDaemon(True)
         th.start()
         return self
+
+    def custom_query_task_id(self, custom_query):
+        # Using self.name as we don't have indices
+        return f"{self.name}_{hash(str(custom_query))}"
 
     def start_task(self, client: Client, custom_query: Dict[str, Any]) -> "DaskModule":
         """
@@ -142,9 +155,12 @@ class DaskModule(HDF5CacheMixin, Generic[ConfigScope]):
         """
         log.info(f"Starting custom query {self.name}")
         # pure=false to be sure that everything is rerun.
-        # Using self.name as key as we don't have indices
         self.future = client.submit(
-            self.compute, custom_query, key=f"{self.name}_{hash(str(custom_query))}", pure=False
+            self.compute,
+            custom_query,
+            key=self.custom_query_task_id(custom_query),
+            pure=False,
+            workers=self.worker,
         )
         # Tell that this future is for custom use only.
         self.future.is_custom = True
@@ -161,7 +177,7 @@ class DaskModule(HDF5CacheMixin, Generic[ConfigScope]):
             Result of `self.compute_on_dataset_split`.
 
         """
-        if dependencies is not None:
+        if dependencies:
             secede()
             for event in dependencies:
                 try:
@@ -208,10 +224,14 @@ class DaskModule(HDF5CacheMixin, Generic[ConfigScope]):
         elif fut.status == "lost":
             log.warning(f"Future is lost in {self.name}! Retrying")
             fut.retry()
-        elif fut.status == "finished" and not self.future.is_custom:
+        elif fut.status == "finished" and not fut.is_custom:
             # Store the result in cache
             self._store_data_in_cache(fut.result(), fut.indices)
             log.info(f"{self.name} completed and stored in cache", status=fut.status)
+
+    def clear(self):
+        """Useful to make sure the task is not kept in memory."""
+        self.future = None
 
     def _wait_for_completion(self):
         """Internal function that loop till completion and then set `self.done_event`."""
@@ -225,11 +245,14 @@ class DaskModule(HDF5CacheMixin, Generic[ConfigScope]):
         if self.done_event is not None:
             self.done_event.wait()
 
+    def should_be_started(self):
+        return self.status() not in {"pending", "finished"} and not self.done()
+
     def status(self):
         """Return the status of the future.
 
         Returns:
-            One of {'not_started', 'pending', 'lost', 'error', 'done'}.
+            One of {'not_started', 'pending', 'lost', 'error', 'finished'}.
             If the task was not launched, `not_started` will be returned by default.
         """
         if self.future:

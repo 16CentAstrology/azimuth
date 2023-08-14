@@ -1,5 +1,6 @@
 import _ from "lodash";
 import { toast } from "react-toastify";
+import { CountPerFilterValue, OutcomeCountPerFilterValue } from "types/api";
 import {
   QueryClassOverlapState,
   QueryFilterState,
@@ -8,6 +9,7 @@ import {
   QueryPostprocessingState,
   QueryState,
   QueryConfusionMatrixState,
+  QueryDetailsState,
 } from "types/models";
 
 export const classNames = (...args: any[]) => args.filter(Boolean).join(" ");
@@ -50,6 +52,9 @@ export const parseSearchString = (searchString: string) => {
     confusionMatrix: convertSearchParams<QueryConfusionMatrixState>(q, {
       normalize: (s) => s === null && undefined,
       reorderClasses: (s) => s === null && undefined,
+    }),
+    details: convertSearchParams<QueryDetailsState>(q, {
+      detailsForPageItem: convertNumber,
     }),
     filters: convertSearchParams<QueryFilterState>(q, {
       confidenceMin: convertNumber,
@@ -106,3 +111,8 @@ export const isPipelineSelected = (
 ): pipeline is Required<QueryPipelineState> => {
   return pipeline.pipelineIndex !== undefined;
 };
+
+export const isOutcomeCountPerFilterValue = (
+  countPerFilterValue: CountPerFilterValue
+): countPerFilterValue is OutcomeCountPerFilterValue =>
+  Boolean(countPerFilterValue.outcomeCount);

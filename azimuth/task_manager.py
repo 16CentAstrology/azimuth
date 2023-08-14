@@ -7,14 +7,9 @@ import structlog
 from distributed import Client, SpecCluster
 
 from azimuth.config import AzimuthConfig
-from azimuth.modules.base_classes import ArtifactManager, DaskModule, ExpirableMixin
+from azimuth.modules.base_classes import DaskModule, ExpirableMixin
 from azimuth.modules.task_mapping import model_contract_methods, modules
-from azimuth.types import (
-    DatasetSplitName,
-    ModuleOptions,
-    SupportedMethod,
-    SupportedTask,
-)
+from azimuth.types import DatasetSplitName, ModuleOptions, SupportedMethod, SupportedTask
 from azimuth.utils.cluster import default_cluster
 
 log = structlog.get_logger()
@@ -66,7 +61,6 @@ class TaskManager:
                     mod.future.cancel()
                 except Exception:
                     pass
-        self.clear_worker_cache()
         self.client.close()
 
     def register_task(self, name, cls):
@@ -78,7 +72,7 @@ class TaskManager:
         for route, tasks in root_routes.items():
             for name, task in tasks.items():
                 page_name = f"{route}/{name}"
-                log.info(f"Registering new task in {route}.", name=page_name, clss=task)
+                log.debug(f"Registering new task in {route}.", name=page_name, clss=task)
                 self.register_task(name, task)
 
     def get_all_tasks_status(self, task: Optional[str] = None) -> Dict[str, str]:
@@ -103,7 +97,7 @@ class TaskManager:
         task_name: SupportedTask,
         dataset_split_name: DatasetSplitName,
         mod_options: Optional[ModuleOptions] = None,
-        last_update: int = -1,
+        last_update: float = -1,
         dependencies: Optional[List[DaskModule]] = None,
     ) -> Tuple[str, Optional[DaskModule]]:
         """Get the task `name` run on indices.
@@ -143,14 +137,11 @@ class TaskManager:
                 mod_options=mod_options,
             )
             # Check if this task already exist.
-            key = "_".join(map(str, task.task_id))
-            if key in self.current_tasks:
-                task = self.current_tasks[key]
-            else:
-                self.current_tasks[key] = task
+            key = task.task_id
+            task = self.current_tasks.setdefault(key, task)
 
-            is_expired_uncached = isinstance(task, ExpirableMixin) and task.is_expired(last_update)
-            if not task.done() or is_expired_uncached:
+            is_expired = isinstance(task, ExpirableMixin) and task.is_expired(last_update)
+            if task.should_be_started() or is_expired:
                 if dependencies is not None:
                     dependencies = [d for d in dependencies if not d.done()]
                 task.start_task_on_dataset_split(self.client, dependencies=dependencies)
@@ -197,11 +188,8 @@ class TaskManager:
                 mod_options=mod_options,
             )
             # Check if this task already exist.
-            key = "_".join(map(str, task.task_id + (hash(str(custom_query)),)))
-            if key in self.current_tasks:
-                task = self.current_tasks[key]
-            else:
-                self.current_tasks[key] = task
+            key = task.custom_query_task_id(custom_query)
+            task = self.current_tasks.setdefault(key, task)
 
             # Always start task
             task.start_task(self.client, custom_query)
@@ -219,10 +207,8 @@ class TaskManager:
             **self.get_all_tasks_status(task=None),
         }
 
-    def clear_worker_cache(self):
-        self.client.run(ArtifactManager.clear_cache)
-
     def restart(self):
-        # Clear futures to free memory.
         for task_name, module in self.current_tasks.items():
             module.future = None
+        self.client.restart()
+        log.info("Cluster restarted to free memory.")

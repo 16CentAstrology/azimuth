@@ -27,6 +27,7 @@ export interface CountPerFilterResponse
 }
 export type CountPerFilterValue = Partial<OutcomeCountPerFilterValue> &
   UtteranceCountPerFilterValue;
+export type CustomObject = components["schemas"]["CustomObject"];
 export type DataAction = components["schemas"]["DataAction"];
 export type DatasetDistributionComparison =
   components["schemas"]["DatasetDistributionComparison"];
@@ -42,6 +43,8 @@ export type DatasetWarningGroup = components["schemas"]["DatasetWarningGroup"];
 export type FormatType = components["schemas"]["FormatType"];
 export type GetUtterancesResponse =
   components["schemas"]["GetUtterancesResponse"];
+export type HTTPExceptionModel = components["schemas"]["HTTPExceptionModel"];
+export type MetricDefinition = components["schemas"]["MetricDefinition"];
 export type MetricInfo = components["schemas"]["MetricInfo"];
 export type MetricsPerFilterAPIResponse =
   components["schemas"]["MetricsPerFilterAPIResponse"];
@@ -72,6 +75,12 @@ export type SimilarUtterancesResponse =
 export type SmartTag = components["schemas"]["SmartTag"];
 export type StatusResponse = components["schemas"]["StatusResponse"];
 export type SupportedLanguage = components["schemas"]["SupportedLanguage"];
+export type SupportedModelContract =
+  components["schemas"]["SupportedModelContract"];
+export type SupportedSpacyModels =
+  components["schemas"]["SupportedSpacyModels"];
+export type TemperatureScaling = components["schemas"]["TemperatureScaling"];
+export type ThresholdConfig = components["schemas"]["ThresholdConfig"];
 export type TopWordsResponse = components["schemas"]["TopWordsResponse"];
 export type TopWordsResult = components["schemas"]["TopWordsResult"];
 export type Utterance = components["schemas"]["Utterance"];
@@ -82,4 +91,3 @@ export type UtteranceCountPerFilterValue =
   components["schemas"]["UtteranceCountPerFilterValue"];
 export type UtterancesSortableColumn =
   components["schemas"]["UtterancesSortableColumn"];
-export type ValidationError = components["schemas"]["ValidationError"];

@@ -10,6 +10,7 @@ from tqdm import tqdm
 from azimuth.config import ModelContractConfig, PipelineDefinition
 from azimuth.dataset_split_manager import DatasetSplitManager, PredictionTableKey
 from azimuth.modules.base_classes import ArtifactManager, ConfigScope, DaskModule
+from azimuth.modules.base_classes.dask_module import Worker
 from azimuth.types import DatasetColumn, DatasetSplitName, ModuleOptions, ModuleResponse
 from azimuth.types.general.module_arguments import ModuleEffectiveArguments
 from azimuth.utils.conversion import md5_hash
@@ -32,7 +33,7 @@ class Module(DaskModule[ConfigScope]):
     ):
         mod_options = mod_options or ModuleOptions()
         self.mod_options = mod_options
-        defined_mod_options = set(self.mod_options.no_alias_dict(exclude_defaults=True).keys())
+        defined_mod_options = set(self.mod_options.dict(exclude_defaults=True).keys())
         if not self.required_mod_options.issubset(defined_mod_options):
             raise ValueError(f"{self.__class__.__name__} requires {self.required_mod_options}.")
         if diff := (defined_mod_options - self.required_mod_options - self.optional_mod_options):
@@ -79,7 +80,7 @@ class Module(DaskModule[ConfigScope]):
     def artifact_manager(self):
         """This is set as a property so the Module always have access to the current version of
         the ArtifactManager on the worker."""
-        return ArtifactManager.get_instance()
+        return ArtifactManager.instance()
 
     @property
     def available_dataset_splits(self) -> Set[DatasetSplitName]:
@@ -155,7 +156,8 @@ class Module(DaskModule[ConfigScope]):
         """Load the model according to the config and module options.
 
         This will invoke the Python method supplied in the config.
-        See our API Doc for more details.
+        See our API Doc for more details. It can return a HF Pipeline, a Callable (which can be just
+        a model or a custom pipeline) and a file prediction reader.
 
         Returns:
             Loaded model according to user spec.
@@ -163,7 +165,9 @@ class Module(DaskModule[ConfigScope]):
         Raises:
             ValueError if no valid pipeline exists.
         """
-        _ = self.get_current_pipeline()  # Validate current pipeline exists
+        if self.worker != Worker.model:
+            raise RuntimeError("This module cannot load the model. Modify self.worker.")
+        _ = self.get_pipeline_definition()  # Validate current pipeline exists
         return self.artifact_manager.get_model(self.config, self.mod_options.pipeline_index)
 
     def _get_table_key(self) -> Optional[PredictionTableKey]:
@@ -176,30 +180,25 @@ class Module(DaskModule[ConfigScope]):
             self.config, ModelContractConfig
         ):
             return None
-        current_pipeline = self.get_current_pipeline()
-        use_bma = self.mod_options.use_bma
-        table_key = PredictionTableKey(
-            temperature=current_pipeline.temperature,
+        return PredictionTableKey(
+            temperature=self.get_pipeline_definition().temperature,
             threshold=self.get_threshold(),
-            use_bma=use_bma,
+            use_bma=self.mod_options.use_bma,
             pipeline_index=self.mod_options.pipeline_index,
         )
-        return table_key
 
     def get_threshold(self) -> Optional[float]:
         # The default is None so we have to handle it this way.
-        current_pipeline = self.get_current_pipeline()
-
         thresh = self.mod_options.threshold
         if thresh is None:
-            thresh = current_pipeline.threshold
+            thresh = self.get_pipeline_definition().threshold
         return thresh
 
-    def get_current_pipeline(self) -> PipelineDefinition:
-        """Get current pipeline for this spec.
+    def get_pipeline_definition(self) -> PipelineDefinition:
+        """Get the pipeline definition from the config according to the pipeline_index.
 
         Returns:
-            Config of the current pipeline.
+            Definition of the pipeline from the config.
 
         Raises:
             ValueError if no valid pipeline exists.
@@ -207,20 +206,15 @@ class Module(DaskModule[ConfigScope]):
         # TODO: Could use single dispatch instead?
         if not isinstance(self.config, ModelContractConfig):
             raise ValueError(
-                "This Module does not have access to the pipeline"
-                " as it does not use ModelContractScope."
+                "This module doesn't have access to pipelines as it doesn't use ModelContractConfig"
             )
         if self.config.pipelines is None:
-            raise ValueError("A model was not provided in the config.")
+            raise ValueError("No pipelines configured.")
         if self.mod_options.pipeline_index is None:
             raise ValueError(
-                f"`pipeline_index` is None, expected one"
-                f" of {np.arange(len(self.config.pipelines))}"
+                f"`pipeline_index` is None, expected one of {np.arange(len(self.config.pipelines))}"
             )
         pipelines = assert_not_none(self.config.pipelines)
         pipeline_index = assert_not_none(self.mod_options.pipeline_index)
         current_pipeline = pipelines[pipeline_index]
         return current_pipeline
-
-    def clear_cache(self):
-        self.artifact_manager.clear_cache()

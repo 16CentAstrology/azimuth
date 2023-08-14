@@ -9,12 +9,7 @@ from azimuth.app import get_dataset_split_manager, get_task_manager
 from azimuth.dataset_split_manager import DatasetSplitManager
 from azimuth.modules.model_performance.metrics import MetricsModule
 from azimuth.task_manager import TaskManager
-from azimuth.types import (
-    DatasetSplitName,
-    ModuleOptions,
-    NamedDatasetFilters,
-    SupportedModule,
-)
+from azimuth.types import DatasetSplitName, ModuleOptions, NamedDatasetFilters, SupportedModule
 from azimuth.types.model_performance import (
     MetricsAPIResponse,
     MetricsModuleResponse,
@@ -30,14 +25,11 @@ from azimuth.utils.routers import (
 
 router = APIRouter()
 
-TAGS = ["Metrics v1"]
-
 
 @router.get(
     "",
     summary="Get metrics.",
     description="Get metrics (ECE, outcome count, precision and so on).",
-    tags=TAGS,
     response_model=MetricsAPIResponse,
 )
 def get_metrics(
@@ -71,7 +63,6 @@ def get_metrics(
     "/per_filter",
     summary="Get metrics for each filter.",
     description="Get metrics for each filter based on the current filtering.",
-    tags=TAGS,
     response_model=MetricsPerFilterAPIResponse,
 )
 def get_metrics_per_filter(

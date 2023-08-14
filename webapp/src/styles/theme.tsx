@@ -1,10 +1,20 @@
 import { Theme } from "@emotion/react";
-import { createTheme } from "@mui/material";
+import { createTheme, formHelperTextClasses } from "@mui/material";
 import withStyles from "@mui/styles/withStyles";
 import "styles/typography/gilroy/gilroy.css";
 
 export const GlobalCss = withStyles({
   "@global": {
+    ".Toastify__toast-container": {
+      left: "1em",
+      width: "auto",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "flex-end",
+    },
+    ".Toastify__toast": {
+      whiteSpace: "pre-wrap",
+    },
     ".Toastify__toast--success": {
       color: "#293E40",
       background: "#b0e2ce",
@@ -155,6 +165,13 @@ const customTheme: Theme = createTheme({
       styleOverrides: {
         popper: {
           pointerEvents: "none",
+        },
+      },
+    },
+    MuiFormHelperText: {
+      styleOverrides: {
+        root: {
+          [`&:not(.${formHelperTextClasses.error})`]: { fontWeight: "unset" },
         },
       },
     },

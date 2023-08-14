@@ -16,6 +16,7 @@ from tqdm import tqdm
 from azimuth.config import SimilarityConfig, SimilarityOptions
 from azimuth.dataset_split_manager import FEATURE_FAISS, DatasetSplitManager
 from azimuth.modules.base_classes import DatasetResultModule, IndexableModule
+from azimuth.modules.base_classes.dask_module import Worker
 from azimuth.modules.task_execution import get_task_result
 from azimuth.types import Array, DatasetColumn, DatasetSplitName, ModuleOptions
 from azimuth.types.similarity_analysis import FAISSResponse
@@ -28,6 +29,8 @@ NUM_NEIGHBORS = 20
 class FAISSModule(IndexableModule[SimilarityConfig]):
     """Compute the FAISS features for a dataset split."""
 
+    worker = Worker.encoder
+
     def __init__(
         self,
         dataset_split_name: DatasetSplitName,
@@ -37,22 +40,24 @@ class FAISSModule(IndexableModule[SimilarityConfig]):
         self.encoder = None
         super().__init__(dataset_split_name, config, mod_options)
 
-    def get_model_name_or_path(self):
+    def get_encoder_name_or_path(self):
         model_name_or_path = self.config.similarity.faiss_encoder
         if os.environ.get("TRANSFORMERS_OFFLINE"):
             home = os.environ.get("SENTENCE_TRANSFORMERS_HOME")
             model_name_or_path = os.path.join(home, f"sentence-transformers_{model_name_or_path}")
         return model_name_or_path
 
-    def get_model(self):
+    def get_encoder(self):
+        if self.worker != Worker.encoder:
+            raise RuntimeError("This module cannot load the encoder. Modify self.worker.")
         if self.encoder is None:
             with FileLock(os.path.join(self.cache_dir, "st.lock")):
-                self.encoder = SentenceTransformer(self.get_model_name_or_path())
+                self.encoder = SentenceTransformer(self.get_encoder_name_or_path())
         return self.encoder
 
     def compute_on_dataset_split(self) -> List[FAISSResponse]:  # type: ignore
         ds = self.get_dataset_split()
-        encoder = self.get_model()
+        encoder = self.get_encoder()
 
         encoded = encoder.encode(
             ds[self.config.columns.text_input],

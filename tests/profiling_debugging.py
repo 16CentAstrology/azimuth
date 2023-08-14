@@ -9,17 +9,12 @@ import psutil
 from pyinstrument import Profiler
 from tqdm import tqdm
 
+from azimuth.app import load_dataset_split_managers_from_config
 from azimuth.config import AzimuthConfig
 from azimuth.modules.base_classes import DatasetResultModule
 from azimuth.modules.model_performance.metrics import MetricsPerFilterModule
 from azimuth.task_manager import TaskManager
-from azimuth.types import (
-    DatasetSplitName,
-    ModuleOptions,
-    SupportedMethod,
-    SupportedModule,
-)
-from azimuth.utils.project import load_dataset_split_managers_from_config
+from azimuth.types import DatasetSplitName, ModuleOptions, SupportedMethod, SupportedModule
 
 CFG_FILE = "../local_configs/development/clinc/conf.json"
 MODULE = MetricsPerFilterModule

@@ -55,15 +55,38 @@ It will just take longer, and does not allow for fast debugging.
         The following instructions are inspired from [those](https://gist.github.com/iandanforth/f3ac42b0963bcbfdf56bb446e9f40a33).
         ```shell
         brew install xz
-        pyenv uninstall 3.8.9  # If you already had it - otherwise directly go to the steps
-        pyenv install 3.8.9  # Reinstall (now with the lzma lib available)
-        pyenv local 3.8.9  # Set this version to always run in this directory
+        pyenv uninstall 3.9.11  # If you already had it - otherwise directly go to the steps
+        pyenv install 3.9.11  # Reinstall (now with the lzma lib available)
+        pyenv local 3.9.11  # Set this version to always run in this directory
         ```
 
 From this point, the back end will launch and compute the start-up task.
 
 * You can consult the openapi documentation at `localhost:8091/docs`. From there, you can consult the API documentation and try out the different endpoints. This can be useful for debugging.
 * Note that the back end will not reload automatically based on code changes.
+
+After a successful start, Azimuth saves the provided config in its `config_history.jsonl` artifact. If you use the API to edit the config, the edits are saved there. If you restart Azimuth (for example after shutting it down for the night), you can resume where you left off with:
+```shell
+make LOAD_CONFIG_HISTORY=1 launch.local
+```
+In fact, it is possible to specify both `LOAD_CONFIG_HISTORY=1` and a `CFG_PATH` together, in which case Azimuth will automatically
+
+1. load the config from `CFG_PATH` when it first starts (if `config_history.jsonl` is empty); and
+2. load the config from `config_history.jsonl` from then on (if Azimuth is restarted).
+
+For example:
+```shell
+make CFG_PATH=local_configs/development/clinc_dummy/conf.json \
+     LOAD_CONFIG_HISTORY=1 \
+     launch.local
+```
+Although confusing, this comes in very handy in some contexts like a docker container that might be stopped and restarted with the same command.
+
+??? warning "Using `LOAD_CONFIG_HISTORY=1` with a custom `artifact_path`"
+    The location of `config_history.jsonl` depends on `artifact_path`, so if you customized it in your config, it needs to be consistent when you restart Azimuth. The easiest solution is to always specify both `LOAD_CONFIG_HISTORY=1` and a `CFG_PATH` together, like in the example above. Alternatively, you can specify the environment variable `ARTIFACT_PATH`:
+    ```shell
+    make ARTIFACT_PATH=cache LOAD_CONFIG_HISTORY=1 launch.local
+    ```
 
 !!! warning "Cleaning the Cache"
     If you make changes to back-end modules that result in different module responses, you will need to delete the cache, using:

@@ -5,11 +5,7 @@ from threading import Event
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, HTTPException, Query
-from starlette.status import (
-    HTTP_400_BAD_REQUEST,
-    HTTP_404_NOT_FOUND,
-    HTTP_503_SERVICE_UNAVAILABLE,
-)
+from starlette.status import HTTP_400_BAD_REQUEST, HTTP_404_NOT_FOUND, HTTP_503_SERVICE_UNAVAILABLE
 
 from azimuth.app import get_config, get_ready_flag, get_startup_tasks, get_task_manager
 from azimuth.config import AzimuthConfig
@@ -28,7 +24,7 @@ from azimuth.types.tag import DataAction, SmartTag, SmartTagFamily
 from azimuth.utils.project import predictions_available
 
 
-def get_last_update(dataset_split_managers: List[Optional[DatasetSplitManager]]) -> int:
+def get_last_update(dataset_split_managers: List[Optional[DatasetSplitManager]]) -> float:
     last_update = max([dsm.last_update if dsm else -1 for dsm in dataset_split_managers])
 
     return last_update
@@ -50,7 +46,7 @@ def build_named_dataset_filters(
     outcome: List[OutcomeName] = Query([], title="Outcomes"),
     utterance: Optional[str] = Query(None, title="Utterance"),
 ) -> NamedDatasetFilters:
-    """Build the named filter component used by many tasks. Intended as a FastAPI endpoint dependency.
+    """Build the named filter component. Intended as a FastAPI endpoint dependency.
 
     Args:
         confidence_min: The desired minimum confidence
@@ -97,7 +93,7 @@ def get_standard_task_result(
     dataset_split_name: DatasetSplitName,
     task_manager: TaskManager,
     mod_options: Optional[ModuleOptions] = None,
-    last_update: int = -1,
+    last_update: float = -1,
 ):
     """Generate the task object and get the result for standard tasks.
 
@@ -123,12 +119,10 @@ def get_standard_task_result(
     )
 
     if not task:
-        raise HTTPException(
-            status_code=HTTP_404_NOT_FOUND, detail=f"Aggregation not found {task_name}"
-        )
+        raise HTTPException(status_code=HTTP_404_NOT_FOUND, detail=f"Task not found {task_name}")
 
     task_result = task.result()
-
+    task.clear()
     return task_result
 
 
@@ -162,14 +156,14 @@ def get_custom_task_result(
 
 
 def require_pipeline_index(
-    pipeline_index: int = Query(..., title="Pipeline index"),
+    pipeline_index: int = Query(..., title="Pipeline index", ge=0),
     config: AzimuthConfig = Depends(get_config),
 ):
     return query_pipeline_index(pipeline_index, config)
 
 
 def query_pipeline_index(
-    pipeline_index: Optional[int] = Query(None, title="Pipeline index"),
+    pipeline_index: Optional[int] = Query(None, title="Pipeline index", ge=0),
     config: AzimuthConfig = Depends(get_config),
 ) -> Optional[int]:
     """Get and validate the pipeline index from query parameters.
@@ -189,7 +183,7 @@ def query_pipeline_index(
     elif config.pipelines is None:
         raise HTTPException(
             HTTP_400_BAD_REQUEST,
-            detail=f"Current config has no model specified,"
+            detail=f"Current config has no pipeline specified,"
             f" but pipeline index {pipeline_index} was requested.",
         )
     elif len(config.pipelines) < pipeline_index:
@@ -207,7 +201,7 @@ def require_available_model(
 ):
     if not predictions_available(config) or pipeline_index is None:
         raise HTTPException(
-            400, detail="This route requires a model, but none was provided in the configuration."
+            400, detail="This route requires a pipeline, but none was provided in the config."
         )
 
 
@@ -258,8 +252,8 @@ def require_application_ready(
 
 
 def get_pagination(
-    limit: Optional[int] = Query(None, title="Limit"),
-    offset: Optional[int] = Query(None, title="Offset"),
+    limit: Optional[int] = Query(None, title="Limit", ge=1),
+    offset: Optional[int] = Query(None, title="Offset", ge=0),
 ) -> Optional[PaginationParams]:
     """Get the pagination parameters if available.
 

@@ -1,10 +1,10 @@
 ARG DEVICE=cpu
 
-FROM pytorch/pytorch:1.8.1-cuda11.1-cudnn8-runtime as build_gpu
+FROM pytorch/pytorch:1.13.0-cuda11.6-cudnn8-runtime as build_gpu
 # Copy binaries from other images here
 RUN pip install --upgrade pip
 
-FROM python:3.8 as build_cpu
+FROM python:3.9 as build_cpu
 # NOOP step on CPU
 FROM build_${DEVICE}
 
@@ -26,7 +26,7 @@ RUN apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y curl gcc make && \
     rm -rf /var/lib/apt/lists/*
 
-RUN curl -sSL https://install.python-poetry.org | python - --version 1.3.2 \
+RUN curl -sSL https://install.python-poetry.org | python - --version 1.4.0 \
     && ln -sf /usr/local/poetry/bin/poetry /usr/local/bin/poetry
 
 # Install dependencies.
@@ -34,11 +34,13 @@ COPY poetry.lock pyproject.toml /app/
 
 WORKDIR /app
 RUN poetry config virtualenvs.create false && \
-  poetry install --extras ${DEVICE} --no-interaction --no-ansi --no-root $(/usr/bin/test $STAGE == production && echo "--no-dev")
+  poetry install --extras ${DEVICE} --no-interaction --no-ansi --no-root $(/usr/bin/test $STAGE == production && echo "--without dev,test,docs")
 
 # Install the project.
 COPY . /app/
-RUN poetry install --extras ${DEVICE} --no-interaction --no-ansi $(/usr/bin/test $STAGE == production && echo "--no-dev")
-ENV CFG_PATH="/config/nlp_sa/conf.json"
-ENV PORT=8091
-CMD ["sh","-c","umask 0002; python runner.py ${CFG_PATH} --port ${PORT}"]
+RUN poetry install --extras ${DEVICE} --no-interaction --no-ansi $(/usr/bin/test $STAGE == production && echo "--without dev,test,docs")
+ENV CFG_PATH=
+ENV LOAD_CONFIG_HISTORY=
+ENV PORT=
+ENV ARTIFACT_PATH=/cache
+CMD ["sh","-c","umask 0002; python runner.py ${CFG_PATH} ${LOAD_CONFIG_HISTORY:+--load-config-history} ${PORT:+--port ${PORT}}"]

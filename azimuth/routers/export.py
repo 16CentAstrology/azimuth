@@ -5,10 +5,10 @@
 import os
 import time
 from os.path import join as pjoin
-from typing import Dict, Generator, List, Optional, cast
+from typing import Dict, Generator, List, Optional
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from starlette.status import HTTP_404_NOT_FOUND
 
@@ -21,12 +21,7 @@ from azimuth.app import (
 from azimuth.config import AzimuthConfig
 from azimuth.dataset_split_manager import DatasetSplitManager, PredictionTableKey
 from azimuth.task_manager import TaskManager
-from azimuth.types import (
-    DatasetColumn,
-    DatasetSplitName,
-    ModuleOptions,
-    SupportedModule,
-)
+from azimuth.types import DatasetColumn, DatasetSplitName, ModuleOptions, SupportedModule
 from azimuth.types.perturbation_testing import (
     PerturbationTestSummary,
     PerturbedUtteranceDetailedResult,
@@ -45,25 +40,23 @@ from azimuth.utils.validation import assert_not_none
 
 router = APIRouter()
 
-TAGS = ["Export v1"]
-
 
 @router.get(
     "/dataset_splits/{dataset_split_name}/utterances",
     summary="Export dataset_split as csv.",
     description="Export the dataset_split to a CSV file and returns it.",
-    tags=TAGS,
     response_class=FileResponse,
 )
 def export_dataset(
     dataset_split_manager: DatasetSplitManager = Depends(get_dataset_split_manager),
     pipeline_index: Optional[int] = Depends(query_pipeline_index),
     config: AzimuthConfig = Depends(get_config),
+    use_bma: bool = Query(False, title="Use Bayesian Model Averaging for better estimation."),
 ) -> FileResponse:
     table_key = (
         None
         if pipeline_index is None
-        else PredictionTableKey.from_pipeline_index(pipeline_index, config)
+        else PredictionTableKey.from_pipeline_index(pipeline_index, config, use_bma=use_bma)
     )
     path = dataset_split_manager.save_csv(table_key=table_key)
 
@@ -75,7 +68,6 @@ def export_dataset(
     "/dataset_splits/{dataset_split_name}/proposed_actions",
     summary="Export proposed actions as csv.",
     description="Export proposed actions to a CSV file and returns it.",
-    tags=TAGS,
     response_class=FileResponse,
 )
 def export_proposed_actions(
@@ -89,7 +81,6 @@ def export_proposed_actions(
     "/perturbation_testing_summary",
     summary="Export perturbation testing summary as csv.",
     description="Export the perturbation testing summary to a CSV file and returns it.",
-    tags=TAGS,
     response_class=FileResponse,
     dependencies=[Depends(require_available_model)],
 )
@@ -117,14 +108,13 @@ def get_export_perturbation_testing_summary(
         mod_options=ModuleOptions(pipeline_index=pipeline_index),
     )[0].all_tests_summary
 
-    cfg = task_manager.config
     df = pd.DataFrame.from_records([t.dict() for t in task_result])
-    df["example"] = df["example"].apply(lambda i: i["perturbedUtterance"])
+    df["example"] = df["example"].apply(lambda i: i["perturbed_utterance"])
     file_label = time.strftime("%Y%m%d_%H%M%S", time.localtime())
 
-    filename = f"azimuth_export_behavioral_testing_summary_{cfg.name}_{file_label}.csv"
+    filename = f"azimuth_export_behavioral_testing_summary_{config.name}_{file_label}.csv"
 
-    path = pjoin(cfg.get_artifact_path(), filename)
+    path = pjoin(config.get_project_path(), filename)
 
     df.to_csv(path, index=False)
 
@@ -136,7 +126,6 @@ def get_export_perturbation_testing_summary(
     summary="Export perturbed dataset split as json.",
     description="Export the perturbed dataset split (training or evaluation) to a JSON file and "
     "returns it.",
-    tags=TAGS,
     response_class=FileResponse,
     dependencies=[Depends(require_available_model)],
 )
@@ -146,13 +135,13 @@ def get_export_perturbed_set(
     dataset_split_manager: DatasetSplitManager = Depends(get_dataset_split_manager),
     pipeline_index: int = Depends(require_pipeline_index),
     config: AzimuthConfig = Depends(get_config),
+    use_bma: bool = Query(False, title="Use Bayesian Model Averaging for better estimation."),
 ) -> FileResponse:
     pipeline_index_not_null = assert_not_none(pipeline_index)
     file_label = time.strftime("%Y%m%d_%H%M%S", time.localtime())
-    cfg = task_manager.config
 
-    filename = f"azimuth_export_modified_set_{cfg.name}_{dataset_split_name}_{file_label}.json"
-    path = pjoin(cfg.get_artifact_path(), filename)
+    filename = f"azimuth_export_modified_set_{config.name}_{dataset_split_name}_{file_label}.json"
+    path = pjoin(config.get_project_path(), filename)
 
     task_result: List[List[PerturbedUtteranceResult]] = get_standard_task_result(
         SupportedModule.PerturbationTesting,
@@ -163,7 +152,11 @@ def get_export_perturbed_set(
 
     output = list(
         make_utterance_level_result(
-            dataset_split_manager, task_result, pipeline_index=pipeline_index_not_null
+            dataset_split_manager,
+            task_result,
+            pipeline_index=pipeline_index_not_null,
+            config=config,
+            use_bma=use_bma,
         )
     )
     with open(path, "w") as f:
@@ -172,7 +165,11 @@ def get_export_perturbed_set(
 
 
 def make_utterance_level_result(
-    dm: DatasetSplitManager, results: List[List[PerturbedUtteranceResult]], pipeline_index: int
+    dm: DatasetSplitManager,
+    results: List[List[PerturbedUtteranceResult]],
+    pipeline_index: int,
+    config: AzimuthConfig,
+    use_bma: bool,
 ) -> Generator[Dict, None, None]:
     """Massage perturbation testing results for the frontend.
 
@@ -180,19 +177,17 @@ def make_utterance_level_result(
         dm: Current DatasetSplitManager.
         results: Output of Perturbation Testing.
         pipeline_index: Index of the pipeline that made the results.
+        config: Azimuth config
+        use_bma: Use Bayesian Model Averaging for better estimation.
 
     Returns:
         Generator that yield json-able object for the frontend.
 
     """
-    config = cast(AzimuthConfig, dm.config)
     for idx, (utterance, test_results) in enumerate(
         zip(
             dm.get_dataset_split(
-                PredictionTableKey.from_pipeline_index(
-                    pipeline_index,
-                    config,
-                )
+                PredictionTableKey.from_pipeline_index(pipeline_index, config, use_bma=use_bma)
             ),
             results,
         )

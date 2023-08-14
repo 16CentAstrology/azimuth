@@ -1,7 +1,12 @@
 import { QueryReturnValue } from "@reduxjs/toolkit/dist/query/baseQueryTypes";
 import { createApi, fakeBaseQuery } from "@reduxjs/toolkit/query/react";
-import { AzimuthConfig, DataAction, UtterancePatch } from "types/api";
-import { fetchApi, GetUtterancesQueryState, TypedResponse } from "utils/api";
+import { AzimuthConfig, UtterancePatch } from "types/api";
+import {
+  fetchApi,
+  GetUtterancesQueryState,
+  PatchUtterancesQueryState,
+  TypedResponse,
+} from "utils/api";
 import { raiseSuccessToast } from "utils/helpers";
 
 const responseToData =
@@ -13,8 +18,8 @@ const responseToData =
     try {
       const response = await responsePromise(arg);
       return { data: await response.json() };
-    } catch {
-      return { error: { message } };
+    } catch (error) {
+      return { error: { message: `${message}\n${(error as Error).message}` } };
     }
   };
 
@@ -22,6 +27,7 @@ const tagTypes = [
   "DatasetInfo",
   "ConfidenceHistogram",
   "Config",
+  "ConfigHistory",
   "DefaultConfig",
   "Metrics",
   "OutcomeCountPerThreshold",
@@ -194,26 +200,16 @@ export const api = createApi({
     }),
     updateDataActions: build.mutation<
       UtterancePatch[],
-      {
-        persistentIds: UtterancePatch["persistentId"][];
-        newValue: DataAction;
-      } & GetUtterancesQueryState
+      PatchUtterancesQueryState & Omit<GetUtterancesQueryState, "body">
     >({
-      queryFn: async ({ jobId, datasetSplitName, persistentIds, newValue }) =>
+      queryFn: async ({ jobId, datasetSplitName, ignoreNotFound, body }) =>
         responseToData(
           fetchApi({
             path: "/dataset_splits/{dataset_split_name}/utterances",
             method: "patch",
           }),
           "Something went wrong updating proposed actions"
-        )({
-          jobId,
-          datasetSplitName,
-          body: persistentIds.map((persistentId) => ({
-            persistentId,
-            dataAction: newValue,
-          })),
-        }),
+        )({ jobId, datasetSplitName, ignoreNotFound, body }),
       invalidatesTags: () => [
         "ConfidenceHistogram",
         "ConfusionMatrix",
@@ -225,14 +221,19 @@ export const api = createApi({
         "Utterances",
       ],
       async onQueryStarted(
-        { persistentIds, newValue, ...args },
+        { ignoreNotFound, body, ...args },
         { dispatch, queryFulfilled }
       ) {
         const patchResult = dispatch(
           api.util.updateQueryData("getUtterances", args, (draft) => {
             draft.utterances.forEach((utterance) => {
-              if (persistentIds.includes(utterance.persistentId)) {
-                utterance.dataAction = newValue;
+              const found = body.find(
+                // Support persistent ids that can be either strings or numbers.
+                // eslint-disable-next-line eqeqeq
+                ({ persistentId }) => persistentId == utterance.persistentId
+              );
+              if (found) {
+                utterance.dataAction = found.dataAction;
               }
             });
           })
@@ -269,14 +270,30 @@ export const api = createApi({
       providesTags: [{ type: "Config" }],
       queryFn: responseToData(
         fetchApi({ path: "/config", method: "get" }),
-        "Something went wrong fetching config"
+        "Something went wrong fetching the config"
+      ),
+    }),
+    getConfigHistory: build.query({
+      providesTags: [{ type: "ConfigHistory" }],
+      queryFn: responseToData(
+        fetchApi({ path: "/config/history", method: "get" }),
+        "Something went wrong fetching the config history"
       ),
     }),
     getDefaultConfig: build.query({
       providesTags: [{ type: "DefaultConfig" }],
       queryFn: responseToData(
         fetchApi({ path: "/config/default", method: "get" }),
-        "Something went wrong fetching default config"
+        "Something went wrong fetching the default config"
+      ),
+    }),
+    validateConfig: build.mutation<
+      AzimuthConfig,
+      { jobId: string; body: Partial<AzimuthConfig> }
+    >({
+      queryFn: responseToData(
+        fetchApi({ path: "/config/validate", method: "patch" }),
+        "Something went wrong validating the config"
       ),
     }),
     updateConfig: build.mutation<
@@ -285,9 +302,13 @@ export const api = createApi({
     >({
       queryFn: responseToData(
         fetchApi({ path: "/config", method: "patch" }),
-        "Something went wrong updating config"
+        "Something went wrong updating the config"
       ),
-      invalidatesTags: () => tagTypes,
+      // We invalidate Status first, so StatusCheck stops rendering the app if
+      // necessary. We await queryFulfilled before invalidating the other tags.
+      // We don't invalidate Status if the update fails, as StatusCheck would stop
+      // rendering the app while fetching Status and the config dialog would close.
+      invalidatesTags: (_, error) => (error ? [] : ["Status"]),
       async onQueryStarted(
         { jobId, body: partialConfig },
         { dispatch, queryFulfilled }
@@ -334,7 +355,11 @@ export const api = createApi({
               Object.assign(draft, data);
             })
           );
-          dispatch(api.util.invalidateTags(["DatasetInfo"]));
+          dispatch(
+            api.util.invalidateTags(
+              tagTypes.filter((tag) => tag !== "Config" && tag !== "Status")
+            )
+          );
         } catch {
           patchConfig.undo();
           patchDatasetInfo.undo();
@@ -345,7 +370,7 @@ export const api = createApi({
       providesTags: () => [{ type: "Status" }],
       queryFn: responseToData(
         fetchApi({ path: "/status", method: "get" }),
-        "Something went wrong fetching status"
+        "Something went wrong fetching the status"
       ),
     }),
   }),
@@ -354,6 +379,7 @@ export const api = createApi({
 export const {
   getConfidenceHistogram: getConfidenceHistogramEndpoint,
   getConfig: getConfigEndpoint,
+  getConfigHistory: getConfigHistoryEndpoint,
   getDefaultConfig: getDefaultConfigEndpoint,
   getConfusionMatrix: getConfusionMatrixEndpoint,
   getDatasetInfo: getDatasetInfoEndpoint,
@@ -372,6 +398,7 @@ export const {
   getStatus: getStatusEndpoint,
   getTopWords: getTopWordsEndpoint,
   getUtterances: getUtterancesEndpoint,
+  validateConfig: validateConfigEndpoint,
   updateConfig: updateConfigEndpoint,
   updateDataActions: updateDataActionsEndpoint,
 } = api.endpoints;

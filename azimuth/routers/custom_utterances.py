@@ -26,14 +26,11 @@ from azimuth.utils.routers import get_custom_task_result, require_pipeline_index
 
 router = APIRouter()
 
-TAGS = ["Custom Utterances v1"]
-
 
 @router.get(
     "/perturbed_utterances",
     summary="Get perturbed utterances based on custom utterances.",
     description="Get perturbed utterances based on custom utterances.",
-    tags=TAGS,
 )
 def get_perturbed_utterances(
     utterances: List[str] = Query([], title="Utterances"),
@@ -80,7 +77,7 @@ def get_perturbed_utterances(
         mocked_test_result += perturbation_test_results
 
     pt = pjoin(
-        config.get_artifact_path(),
+        config.get_project_path(),
         "azimuth_generate_perturbation_tests.json",
     )
     with open(pt, "w") as f:
@@ -92,7 +89,6 @@ def get_perturbed_utterances(
     "/saliency",
     summary="Get saliency for custom utterances.",
     description="Get saliency for custom utterances.",
-    tags=TAGS,
     response_model=List[SaliencyResponse],
 )
 def get_saliency(

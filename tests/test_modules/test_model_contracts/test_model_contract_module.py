@@ -13,12 +13,7 @@ from azimuth.modules.model_contracts import (
     CustomTextClassificationModule,
     HFTextClassificationModule,
 )
-from azimuth.types import (
-    DatasetColumn,
-    DatasetSplitName,
-    ModuleOptions,
-    SupportedMethod,
-)
+from azimuth.types import DatasetColumn, DatasetSplitName, ModuleOptions, SupportedMethod
 from azimuth.types.tag import SmartTag
 from azimuth.types.task import PredictionResponse
 from azimuth.utils.ml.postprocessing import PostProcessingIO
@@ -63,7 +58,7 @@ def test_pipeline_steps(simple_text_config):
     )
     for order, class_name in enumerate(("TemperatureScaling", "Thresholding")):
         assert (
-            ds[DatasetColumn.pipeline_steps][0]["postprocessing_steps"][order]["className"]
+            ds[DatasetColumn.pipeline_steps][0]["postprocessing_steps"][order]["class_name"]
             == class_name
         )
     # The prediction of the last pipeline step should be the same as the postprocessed prediction.
@@ -194,18 +189,18 @@ def test_pred_smart_tags(clinc_text_config):
 
     mod.save_result(res, dm)
 
-    clinc_table_key = get_table_key(clinc_text_config)
-    assert SmartTag.correct_top_3 in dm.get_dataset_split(clinc_table_key).column_names
-    assert SmartTag.correct_low_conf in dm.get_dataset_split(clinc_table_key).column_names
+    table_key = get_table_key(clinc_text_config)
+    ds = dm.get_dataset_split(table_key)
+    assert SmartTag.correct_top_3 and SmartTag.correct_low_conf in ds.column_names
 
-    assert dm.get_dataset_split(clinc_table_key)[SmartTag.correct_top_3] == [
+    assert ds[SmartTag.correct_top_3] == [
         False,
         True,
         False,
         True,
         False,
     ], "Problem with correct_top_3 smart tag"
-    assert dm.get_dataset_split(clinc_table_key)[SmartTag.correct_low_conf] == [
+    assert ds[SmartTag.correct_low_conf] == [
         False,
         False,
         True,
@@ -256,7 +251,6 @@ def test_structured_output_text_classification(simple_text_config, model_contrac
     )
 
     preds = cast(List[PredictionResponse], mod.compute_on_dataset_split())
-    mod.clear_cache()
 
     ####
     # Postprocessing

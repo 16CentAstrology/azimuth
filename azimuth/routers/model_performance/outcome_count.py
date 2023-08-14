@@ -10,12 +10,7 @@ from starlette.status import HTTP_400_BAD_REQUEST
 from azimuth.app import get_dataset_split_manager, get_task_manager
 from azimuth.dataset_split_manager import DatasetSplitManager
 from azimuth.task_manager import TaskManager
-from azimuth.types import (
-    DatasetSplitName,
-    ModuleOptions,
-    NamedDatasetFilters,
-    SupportedModule,
-)
+from azimuth.types import DatasetSplitName, ModuleOptions, NamedDatasetFilters, SupportedModule
 from azimuth.types.model_performance import (
     OutcomeCountPerFilterResponse,
     OutcomeCountPerThresholdResponse,
@@ -28,14 +23,11 @@ from azimuth.utils.routers import (
 
 router = APIRouter()
 
-TAGS = ["Outcome Count v1"]
-
 
 @router.get(
     "/per_threshold",
     summary="Get outcome count for multiple thresholds.",
     description="Get prediction count per outcome for multiple thresholds.",
-    tags=TAGS,
     response_model=OutcomeCountPerThresholdResponse,
 )
 def get_outcome_count_per_threshold(
@@ -66,7 +58,6 @@ def get_outcome_count_per_threshold(
     "/per_filter",
     summary="Get outcome count for each filter.",
     description="Get outcome count for each filter based on the current filtering.",
-    tags=TAGS,
     response_model=OutcomeCountPerFilterResponse,
 )
 def get_outcome_count_per_filter(

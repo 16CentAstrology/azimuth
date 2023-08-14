@@ -1,5 +1,8 @@
+import { HTTPExceptionModel } from "types/api";
 import { paths } from "types/generated/generatedTypes";
 import { constructApiSearchString } from "./helpers";
+
+const HTTP_EXCEPTION_STATUS_CODES = [400, 401, 403, 404, 422, 503];
 
 type CamelCase<SnakeCase> = SnakeCase extends `${infer FirstWord}_${infer Rest}`
   ? `${FirstWord}${Capitalize<CamelCase<Rest>>}`
@@ -88,13 +91,22 @@ export const fetchApi =
     // fetch() might throw if the user is offline, or some unlikely networking error occurs, such a DNS lookup failure.
     // Let's also throw if the status is not OK, so it's uniform.
     if (!response.ok) {
-      throw Error(`${response.status} : ${response.statusText}`);
+      if (HTTP_EXCEPTION_STATUS_CODES.includes(response.status)) {
+        const { detail } = (await response.json()) as HTTPExceptionModel;
+        throw Error(detail);
+      } else {
+        throw Error(`${response.status} ${response.statusText}`);
+      }
     }
     return response;
   };
 
 export type GetUtterancesQueryState = OperationArgs<
   paths["/dataset_splits/{dataset_split_name}/utterances"]["get"]
+>;
+
+export type PatchUtterancesQueryState = OperationArgs<
+  paths["/dataset_splits/{dataset_split_name}/utterances"]["patch"]
 >;
 
 // There doesn't seem to be a better way to do this:
@@ -122,7 +134,7 @@ const downloadFileFromApi =
     downloadBlob(blob, filename);
   };
 
-async function downloadBlob(blob: Blob, filename?: string) {
+export async function downloadBlob(blob: Blob, filename?: string) {
   const downloadUrl = window.URL.createObjectURL(blob);
 
   const link = document.createElement("a");

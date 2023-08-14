@@ -1,4 +1,4 @@
-import { Settings } from "@mui/icons-material";
+import { Settings as SettingsIcon } from "@mui/icons-material";
 import { Box, Breadcrumbs, IconButton, Link, Typography } from "@mui/material";
 import makeStyles from "@mui/styles/makeStyles";
 import useQueryState from "hooks/useQueryState";
@@ -10,10 +10,53 @@ import {
   useParams,
 } from "react-router-dom";
 import { getConfigEndpoint, getDatasetInfoEndpoint } from "services/api";
-import { DatasetSplitName } from "types/api";
 import { constructSearchString } from "utils/helpers";
 import HelpMenu from "components/HelpMenu";
 import PipelineSelect from "components/PipelineSelect";
+import Settings from "pages/Settings";
+
+const BREADCRUMBS = [
+  {
+    pathname: /^\/[^/]+/,
+    name: "Dashboard",
+  },
+  {
+    pathname: /^\/[^/]+\/behavioral_testing_summary/,
+    name: "Behavioral Testing Summary",
+  },
+  {
+    pathname: /^\/[^/]+\/dataset_splits\/[^/]+\/class_overlap/,
+    name: "Class Overlap",
+  },
+  {
+    pathname: /^\/[^/]+\/dataset_splits\/[^/]+\/pipeline_metrics/,
+    name: "Pipeline Metrics by Data Subpopulation",
+  },
+  {
+    pathname: /^\/[^/]+\/dataset_splits\/[^/]+\/smart_tags/,
+    name: "Smart Tag Analysis",
+  },
+  {
+    pathname: /^\/[^/]+\/settings/,
+    name: "Settings",
+  },
+  {
+    pathname: /^\/[^/]+\/thresholds/,
+    name: "Threshold Comparison",
+  },
+  {
+    pathname: /^\/[^/]+\/dataset_warnings/,
+    name: "Dataset Warnings",
+  },
+  {
+    pathname: /^\/[^/]+\/dataset_splits\/[^/]+\/[^/]+/,
+    name: "Exploration",
+  },
+  {
+    pathname: /^\/[^/]+\/dataset_splits\/[^/]+\/utterances\/[^/]+/,
+    name: "Utterance Details",
+  },
+];
 
 const useStyles = makeStyles((theme) => ({
   jobHeader: {
@@ -31,17 +74,7 @@ const useStyles = makeStyles((theme) => ({
 
 const PageHeader = () => {
   const classes = useStyles();
-  const {
-    jobId,
-    utteranceId,
-    datasetSplitName,
-    mainView = "utterances",
-  } = useParams<{
-    jobId: string;
-    utteranceId?: string;
-    datasetSplitName?: DatasetSplitName;
-    mainView?: string;
-  }>();
+  const { jobId } = useParams<{ jobId: string }>();
 
   const { data: config } = getConfigEndpoint.useQuery(
     { jobId },
@@ -80,79 +113,38 @@ const PageHeader = () => {
     );
   };
 
+  const [configOpen, setConfigOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (config?.dataset === null) {
+      setConfigOpen(true);
+    }
+  }, [config]);
+
   const dashboardPathname = `/${jobId}`;
 
   const isDashboard = location.pathname === dashboardPathname;
 
-  const subrouteBreadcrumbs = React.useMemo(
-    () =>
-      [
-        {
-          pathname: `/${jobId}`,
-          name: "Dashboard",
-        },
-        {
-          pathname: `/${jobId}/behavioral_testing_summary`,
-          name: "Behavioral Testing Summary",
-        },
-        {
-          pathname: `/${jobId}/dataset_splits/${datasetSplitName}/class_overlap`,
-          name: "Class Overlap",
-        },
-        {
-          pathname: `/${jobId}/dataset_splits/${datasetSplitName}/pipeline_metrics`,
-          name: "Pipeline Metrics by Data Subpopulation",
-        },
-        {
-          pathname: `/${jobId}/dataset_splits/${datasetSplitName}/smart_tags`,
-          name: "Smart Tag Analysis",
-        },
-        {
-          pathname: `/${jobId}/settings`,
-          name: "Settings",
-        },
-        {
-          pathname: `/${jobId}/thresholds`,
-          name: "Threshold Comparison",
-        },
-        {
-          pathname: `/${jobId}/dataset_warnings`,
-          name: "Dataset Warnings",
-        },
-        {
-          pathname: `/${jobId}/dataset_splits/${datasetSplitName}/${mainView}`,
-          name: "Exploration",
-        },
-        {
-          pathname: `/${jobId}/dataset_splits/${datasetSplitName}/utterances/${utteranceId}`,
-          name: "Utterance Details",
-        },
-      ]
-        .filter(({ pathname }) => location.pathname.includes(pathname))
-        .map(({ pathname, name }) =>
-          pathname === location.pathname ? (
-            <Typography variant="body1" key={name}>
-              {name}
-            </Typography>
-          ) : (
-            <Link
-              component={RouterLink}
-              key={name}
-              to={`${pathname}${searchString}`}
-            >
-              {name}
-            </Link>
-          )
-        ),
-    [
-      jobId,
-      utteranceId,
-      datasetSplitName,
-      mainView,
-      location.pathname,
-      searchString,
-    ]
-  );
+  const subrouteBreadcrumbs = React.useMemo(() => {
+    return BREADCRUMBS.flatMap(({ pathname, name }) => {
+      const match = location.pathname.match(pathname);
+      return match == null ? (
+        []
+      ) : match[0] === location.pathname ? (
+        <Typography variant="body1" key={name}>
+          {name}
+        </Typography>
+      ) : (
+        <Link
+          component={RouterLink}
+          key={name}
+          to={`${match[0]}${searchString}`}
+        >
+          {name}
+        </Link>
+      );
+    });
+  }, [location.pathname, searchString]);
 
   return (
     <div>
@@ -174,10 +166,9 @@ const PageHeader = () => {
               </>
             )}
             <IconButton
-              component={RouterLink}
               size="small"
               color="primary"
-              to={`/${jobId}/settings${searchString}`}
+              onClick={() => setConfigOpen(true)}
               sx={{
                 padding: 0,
                 "&:hover > svg": {
@@ -186,10 +177,11 @@ const PageHeader = () => {
                 },
               }}
             >
-              <Settings />
+              <SettingsIcon />
             </IconButton>
             <HelpMenu />
           </Box>
+          <Settings open={configOpen} onClose={() => setConfigOpen(false)} />
         </div>
       )}
     </div>

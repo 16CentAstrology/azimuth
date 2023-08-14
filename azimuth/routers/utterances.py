@@ -30,10 +30,7 @@ from azimuth.types.perturbation_testing import (
     PerturbedUtteranceResult,
     PerturbedUtteranceWithClassNames,
 )
-from azimuth.types.similarity_analysis import (
-    SimilarUtterance,
-    SimilarUtterancesResponse,
-)
+from azimuth.types.similarity_analysis import SimilarUtterance, SimilarUtterancesResponse
 from azimuth.types.tag import (
     ALL_DATA_ACTIONS,
     DATASET_SMART_TAG_FAMILIES,
@@ -68,8 +65,6 @@ from azimuth.utils.validation import assert_not_none
 
 router = APIRouter()
 
-TAGS = ["Utterances v1"]
-
 
 class UtterancesSortableColumn(str, Enum):
     index = "index"  # type: ignore
@@ -83,7 +78,6 @@ class UtterancesSortableColumn(str, Enum):
     "",
     summary="Get utterances table view",
     description="Get a table view of the utterances according to filters.",
-    tags=TAGS,
     response_model=GetUtterancesResponse,
 )
 def get_utterances(
@@ -98,16 +92,17 @@ def get_utterances(
     config: AzimuthConfig = Depends(get_config),
     dataset_split_manager: DatasetSplitManager = Depends(get_dataset_split_manager),
     pipeline_index: Optional[int] = Depends(query_pipeline_index),
+    use_bma: bool = Query(False, title="Use Bayesian Model Averaging for better estimation."),
     pagination: Optional[PaginationParams] = Depends(get_pagination),
     without_postprocessing: bool = Query(False, title="Without Postprocessing"),
 ) -> GetUtterancesResponse:
     if predictions_available(config) and pipeline_index is not None:
         threshold = (
             assert_not_none(config.pipelines)[pipeline_index].threshold
-            if postprocessing_known(task_manager.config, pipeline_index)
+            if postprocessing_known(config, pipeline_index)
             else None
         )
-        table_key = PredictionTableKey.from_pipeline_index(pipeline_index, config)
+        table_key = PredictionTableKey.from_pipeline_index(pipeline_index, config, use_bma=use_bma)
     else:
         threshold, table_key = None, None
 
@@ -226,14 +221,12 @@ def get_utterances(
     "",
     summary="Patch utterances",
     description="Patch utterances, such as updating proposed actions.",
-    tags=TAGS,
     response_model=List[UtterancePatch],
 )
 def patch_utterances(
     utterances: List[UtterancePatch] = Body(...),
     config: AzimuthConfig = Depends(get_config),
     dataset_split_manager: DatasetSplitManager = Depends(get_dataset_split_manager),
-    task_manager: TaskManager = Depends(get_task_manager),
     ignore_not_found: bool = Query(False),
 ) -> List[UtterancePatch]:
     if ignore_not_found:
@@ -254,7 +247,6 @@ def patch_utterances(
 
     dataset_split_manager.add_tags(data_actions)
 
-    task_manager.clear_worker_cache()
     updated_tags = dataset_split_manager.get_tags(row_indices)
 
     return [
@@ -273,7 +265,6 @@ def patch_utterances(
     "/{index}/perturbed_utterances",
     summary="Get a perturbed utterances for a single utterance.",
     description="Get a perturbed utterances for a single utterance.",
-    tags=TAGS,
     response_model=List[PerturbedUtteranceWithClassNames],
     dependencies=[Depends(require_available_model)],
 )
@@ -316,13 +307,12 @@ def get_perturbed_utterances(
     "/{index}/similar_utterances",
     summary="Get similar examples to a query",
     description="Get similar examples using a KNN approach.",
-    tags=TAGS,
     response_model=SimilarUtterancesResponse,
 )
 def get_similar(
     dataset_split_name: DatasetSplitName,
     index: int,
-    limit: int = Query(20, title="Limit"),
+    limit: int = Query(20, title="Limit", ge=1),
     neighbors_dataset_split_name: Optional[DatasetSplitName] = Query(
         None, title="Neighbors dataset split"
     ),
@@ -333,6 +323,7 @@ def get_similar(
     ),
     config: AzimuthConfig = Depends(get_config),
     pipeline_index: Optional[int] = Depends(query_pipeline_index),
+    use_bma: bool = Query(False, title="Use Bayesian Model Averaging for better estimation."),
 ) -> SimilarUtterancesResponse:
     if not similarity_available(config):
         return SimilarUtterancesResponse(utterances=[])
@@ -344,10 +335,7 @@ def get_similar(
     if neighbors_ds is None:
         raise HTTPException(HTTP_404_NOT_FOUND, detail="Dataset split not found.")
     table_key = (
-        PredictionTableKey.from_pipeline_index(
-            pipeline_index,
-            config,
-        )
+        PredictionTableKey.from_pipeline_index(pipeline_index, config, use_bma=use_bma)
         if pipeline_index is not None
         else None
     )

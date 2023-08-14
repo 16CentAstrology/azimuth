@@ -1,9 +1,7 @@
 import pytest
 
 from azimuth.dataset_split_manager import PredictionTableKey
-from azimuth.modules.pipeline_comparison.prediction_comparison import (
-    PredictionComparisonModule,
-)
+from azimuth.modules.pipeline_comparison.prediction_comparison import PredictionComparisonModule
 from azimuth.types import DatasetSplitName
 from azimuth.types.pipeline_comparison import PredictionComparisonResponse
 from azimuth.types.tag import SmartTag
@@ -60,7 +58,7 @@ def test_save_results(simple_text_config_multi_pipeline):
     # Check that the tag is applied to all prediction tables.
     for pipeline_index in range(len(simple_text_config_multi_pipeline.pipelines)):
         table_key = PredictionTableKey.from_pipeline_index(
-            pipeline_index, simple_text_config_multi_pipeline
+            pipeline_index, simple_text_config_multi_pipeline, use_bma=False
         )
         ds = dm.get_dataset_split(table_key)
         assert (

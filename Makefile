@@ -31,7 +31,6 @@ include makefiles/Makefile.security
 include makefiles/Makefile.test
 include makefiles/Makefile.local
 include makefiles/Makefile.demo
-include makefiles/Makefile.docs
 
 .PHONY: build
 build: build_be build_fe
@@ -56,9 +55,13 @@ compose: build launch
 
 .PHONY: launch
 launch:
-	docker-compose -f docker-compose.yml $(COMPOSE_EXT) --env-file $(ENV_FILE) up
+	docker compose -f docker-compose.yml $(COMPOSE_EXT) --env-file $(ENV_FILE) up
 
 .PHONY: push
 push:
 	docker push $(REGISTRY)/$(IMAGE):$(TAG)_$(DEVICE)$(TAG_EXT)
 	docker push $(REGISTRY)/$(IMAGE)-app:$(TAG)$(TAG_EXT)
+
+.PHONY: docs_serve
+docs_serve:
+	cd docs && mkdocs serve

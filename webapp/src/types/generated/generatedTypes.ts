@@ -22,13 +22,21 @@ export interface paths {
   };
   "/config/default": {
     /** Get the default configuration */
-    get: operations["get_default_config_def_config_default_get"];
+    get: operations["get_config_default_config_default_get"];
+  };
+  "/config/history": {
+    /** Get the history of the configuration */
+    get: operations["get_config_history_config_history_get"];
   };
   "/config": {
     /** Get the current configuration */
     get: operations["get_config_def_config_get"];
     /** Update the config. */
     patch: operations["patch_config_config_patch"];
+  };
+  "/config/validate": {
+    /** Validate the given partial config update and return the complete config that would result if this update was applied. */
+    patch: operations["validate_config_config_validate_patch"];
   };
   "/dataset_splits/{dataset_split_name}/class_overlap/plot": {
     /** Get a plot of class overlap using Spectral clustering and Monte-Carlo sampling (currently set to all samples). */
@@ -127,9 +135,10 @@ export interface components {
     /** Fields that can be modified without affecting caching. */
     AzimuthConfig: {
       name: string;
-      dataset: components["schemas"]["CustomObject"];
+      dataset: components["schemas"]["CustomObject"] | null;
       columns: components["schemas"]["ColumnConfiguration"];
       rejection_class: string | null;
+      /** Where to store artifacts (Azimuth config history, HDF5 files, HF datasets). */
       artifact_path: string;
       batch_size: number;
       use_cuda: "auto" | boolean;
@@ -140,13 +149,24 @@ export interface components {
       model_contract: components["schemas"]["SupportedModelContract"];
       pipelines: components["schemas"]["PipelineDefinition"][] | null;
       uncertainty: components["schemas"]["UncertaintyOptions"];
-      saliency_layer: string | null;
+      saliency_layer: ("auto" | string) | null;
       metrics: { [key: string]: components["schemas"]["MetricDefinition"] };
       language: components["schemas"]["SupportedLanguage"];
       similarity: components["schemas"]["SimilarityOptions"] | null;
       behavioral_testing:
         | components["schemas"]["BehavioralTestingOptions"]
         | null;
+    };
+    /**
+     * Base class for settings, allowing values to be overridden by environment variables.
+     *
+     * This is useful in production for secrets you do not wish to save in code, it plays nicely with docker(-compose),
+     * Heroku and any 12 factor app design.
+     */
+    AzimuthConfigHistoryWithHash: {
+      config: components["schemas"]["AzimuthConfig"];
+      created_on: string;
+      hash: string;
     };
     /**
      * Base class for settings, allowing values to be overridden by environment variables.
@@ -277,16 +297,14 @@ export interface components {
      */
     DatasetInfoResponse: {
       projectName: string;
-      classNames: string[];
       dataActions: components["schemas"]["DataAction"][];
       smartTags: components["schemas"]["SmartTag"][];
-      evalClassDistribution: number[];
-      trainClassDistribution: number[];
       startupTasks: { [key: string]: any };
       modelContract: components["schemas"]["SupportedModelContract"];
       predictionAvailable: boolean;
       perturbationTestingAvailable: boolean;
       availableDatasetSplits: components["schemas"]["AvailableDatasetSplits"];
+      utteranceCountPerDatasetSplit: components["schemas"]["UtteranceCountPerDatasetSplit"];
       similarityAvailable: boolean;
       postprocessingEditable: boolean[] | null;
     };
@@ -355,8 +373,8 @@ export interface components {
       utteranceCount: number;
       confidenceThreshold: number | null;
     };
-    HTTPValidationError: {
-      detail?: components["schemas"]["ValidationError"][];
+    HTTPExceptionModel: {
+      detail: string;
     };
     /**
      * Base class for settings, allowing values to be overridden by environment variables.
@@ -699,8 +717,11 @@ export interface components {
      * Heroku and any 12 factor app design.
      */
     SimilarityOptions: {
+      /** Language-based dynamic default value. */
       faiss_encoder: string;
+      /** Threshold to use when finding conflicting neighbors. */
       conflicting_neighbors_threshold: number;
+      /** Threshold to determine whether there are close neighbors. */
       no_close_threshold: number;
     };
     /** An enumeration. */
@@ -809,6 +830,7 @@ export interface components {
      */
     TypoTestOptions: {
       threshold: number;
+      /** For example, the value 2 would create both tests with 1 typo and with 2 typos per utterance. */
       nb_typos_per_utterance: number;
     };
     /**
@@ -818,7 +840,9 @@ export interface components {
      * Heroku and any 12 factor app design.
      */
     UncertaintyOptions: {
+      /** Number of MC sampling to do. 1 disables BMA. */
       iterations: number;
+      /** Threshold to determine high epistemic items. */
       high_epistemic_threshold: number;
     };
     /**
@@ -841,6 +865,14 @@ export interface components {
       dissimilar: string[];
       modelPrediction: components["schemas"]["ModelPrediction"] | null;
       modelSaliency: components["schemas"]["ModelSaliency"] | null;
+    };
+    /**
+     * This model should be used as the base for any model that defines aliases to ensure
+     * that all fields are represented correctly.
+     */
+    UtteranceCountPerDatasetSplit: {
+      train: number | null;
+      eval: number | null;
     };
     /**
      * This model should be used as the base for any model that defines aliases to ensure
@@ -884,11 +916,6 @@ export interface components {
       | "label"
       | "prediction"
       | "confidence";
-    ValidationError: {
-      loc: string[];
-      msg: string;
-      type: string;
-    };
   };
 }
 
@@ -902,6 +929,42 @@ export interface operations {
           "application/json": components["schemas"]["StatusResponse"];
         };
       };
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
     };
   };
   /** Get the current dataset info */
@@ -911,6 +974,42 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["DatasetInfoResponse"];
+        };
+      };
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -924,6 +1023,42 @@ export interface operations {
           "application/json": {
             [key: string]: components["schemas"]["MetricInfo"];
           };
+        };
+      };
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -942,16 +1077,46 @@ export interface operations {
           "application/json": components["schemas"]["PerturbationTestingSummary"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
   };
   /** Get the default configuration */
-  get_default_config_def_config_default_get: {
+  get_config_default_config_default_get: {
     parameters: {
       query: {
         language?: components["schemas"]["SupportedLanguage"];
@@ -964,10 +1129,87 @@ export interface operations {
           "application/json": components["schemas"]["AzimuthConfig"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+    };
+  };
+  /** Get the history of the configuration */
+  get_config_history_config_history_get: {
+    responses: {
+      /** Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AzimuthConfigHistoryWithHash"][];
+        };
+      };
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -981,6 +1223,42 @@ export interface operations {
           "application/json": components["schemas"]["AzimuthConfig"];
         };
       };
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
     };
   };
   /** Update the config. */
@@ -992,10 +1270,92 @@ export interface operations {
           "application/json": components["schemas"]["AzimuthConfig"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": { [key: string]: any };
+      };
+    };
+  };
+  /** Validate the given partial config update and return the complete config that would result if this update was applied. */
+  validate_config_config_validate_patch: {
+    responses: {
+      /** Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AzimuthConfig"];
+        };
+      };
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1027,10 +1387,40 @@ export interface operations {
           "application/json": components["schemas"]["ClassOverlapPlotResponse"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1052,10 +1442,40 @@ export interface operations {
           "application/json": components["schemas"]["ClassOverlapTableResponse"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1092,10 +1512,40 @@ export interface operations {
           "application/json": components["schemas"]["ConfidenceHistogramResponse"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1107,6 +1557,42 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["DatasetWarningGroup"][];
+        };
+      };
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
+      422: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1143,10 +1629,40 @@ export interface operations {
           "application/json": components["schemas"]["MetricsAPIResponse"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1168,10 +1684,40 @@ export interface operations {
           "application/json": components["schemas"]["MetricsPerFilterAPIResponse"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1193,10 +1739,40 @@ export interface operations {
           "application/json": components["schemas"]["OutcomeCountPerThresholdResponse"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1233,10 +1809,40 @@ export interface operations {
           "application/json": components["schemas"]["OutcomeCountPerFilterResponse"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1271,10 +1877,40 @@ export interface operations {
           "application/json": components["schemas"]["UtteranceCountPerFilterResponse"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1289,6 +1925,7 @@ export interface operations {
         indices?: number[];
         sort?: components["schemas"]["UtterancesSortableColumn"];
         descending?: boolean;
+        use_bma?: boolean;
         without_postprocessing?: boolean;
         confidence_min?: number;
         confidence_max?: number;
@@ -1316,10 +1953,40 @@ export interface operations {
           "application/json": components["schemas"]["GetUtterancesResponse"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1341,10 +2008,40 @@ export interface operations {
           "application/json": components["schemas"]["UtterancePatch"][];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1372,10 +2069,40 @@ export interface operations {
           "application/json": components["schemas"]["PerturbedUtteranceWithClassNames"][];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1390,6 +2117,7 @@ export interface operations {
       query: {
         limit?: number;
         neighbors_dataset_split_name?: components["schemas"]["DatasetSplitName"];
+        use_bma?: boolean;
         pipeline_index?: number;
       };
     };
@@ -1400,10 +2128,40 @@ export interface operations {
           "application/json": components["schemas"]["SimilarUtterancesResponse"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1415,16 +2173,47 @@ export interface operations {
         dataset_split_name: components["schemas"]["DatasetSplitName"];
       };
       query: {
+        use_bma?: boolean;
         pipeline_index?: number;
       };
     };
     responses: {
       /** Successful Response */
       200: unknown;
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1439,10 +2228,40 @@ export interface operations {
     responses: {
       /** Successful Response */
       200: unknown;
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1457,10 +2276,40 @@ export interface operations {
     responses: {
       /** Successful Response */
       200: unknown;
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1472,16 +2321,47 @@ export interface operations {
         dataset_split_name: components["schemas"]["DatasetSplitName"];
       };
       query: {
+        use_bma?: boolean;
         pipeline_index: number;
       };
     };
     responses: {
       /** Successful Response */
       200: unknown;
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1500,10 +2380,40 @@ export interface operations {
           "application/json": { [key: string]: any };
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1523,10 +2433,40 @@ export interface operations {
           "application/json": components["schemas"]["SaliencyResponse"][];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1563,10 +2503,40 @@ export interface operations {
           "application/json": components["schemas"]["TopWordsResponse"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };
@@ -1605,10 +2575,40 @@ export interface operations {
           "application/json": components["schemas"]["ConfusionMatrixResponse"];
         };
       };
-      /** Validation Error */
+      /** Bad Request */
+      400: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unauthorized */
+      401: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Forbidden */
+      403: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Not Found */
+      404: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Unprocessable Entity */
       422: {
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["HTTPExceptionModel"];
+        };
+      };
+      /** Service Unavailable */
+      503: {
+        content: {
+          "application/json": components["schemas"]["HTTPExceptionModel"];
         };
       };
     };

@@ -1,7 +1,25 @@
-import { ArrowDropDown, GetApp, SvgIconComponent } from "@mui/icons-material";
+import {
+  ArrowDropDown,
+  Close,
+  Download,
+  Fullscreen,
+  SvgIconComponent,
+  Upload,
+} from "@mui/icons-material";
 import FilterAltOutlinedIcon from "@mui/icons-material/FilterAltOutlined";
 import MultilineChartIcon from "@mui/icons-material/MultilineChart";
-import { Box, Button, Menu, MenuItem } from "@mui/material";
+import {
+  Box,
+  Button,
+  Dialog,
+  dialogClasses,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
+  IconButton,
+  Menu,
+  MenuItem,
+} from "@mui/material";
 import makeStyles from "@mui/styles/makeStyles";
 import {
   GridCellParams,
@@ -15,26 +33,36 @@ import CopyButton from "components/CopyButton";
 import Description from "components/Description";
 import OutcomeIcon from "components/Icons/OutcomeIcon";
 import TargetIcon from "components/Icons/Target";
+import FileInputButton from "components/FileInputButton";
+import Loading from "components/Loading";
 import SmartTagFamilyBadge from "components/SmartTagFamilyBadge";
 import { Column, RowProps, Table } from "components/Table";
 import UtteranceDataAction from "components/Utterance/UtteranceDataAction";
 import UtteranceSaliency from "components/Utterance/UtteranceSaliency";
+import UtteranceDetails from "components/UtteranceDetails";
 import React from "react";
 import { Link, useHistory } from "react-router-dom";
-import { getConfigEndpoint, getUtterancesEndpoint } from "services/api";
+import {
+  getConfigEndpoint,
+  getUtterancesEndpoint,
+  updateDataActionsEndpoint,
+} from "services/api";
 import {
   DataAction,
   DatasetInfoResponse,
   DatasetSplitName,
   Utterance,
+  UtterancePatch,
   UtterancesSortableColumn,
 } from "types/api";
 import {
   QueryConfusionMatrixState,
+  QueryDetailsState,
   QueryFilterState,
   QueryPaginationState,
   QueryPipelineState,
   QueryPostprocessingState,
+  QueryState,
 } from "types/models";
 import {
   downloadDatasetSplit,
@@ -45,10 +73,15 @@ import {
   ID_TOOLTIP,
   PAGE_SIZE,
   SMART_TAG_FAMILIES,
+  UNKNOWN_ERROR,
 } from "utils/const";
 import { formatRatioAsPercentageString } from "utils/format";
 import { getUtteranceIdTooltip } from "utils/getUtteranceIdTooltip";
-import { constructSearchString, isPipelineSelected } from "utils/helpers";
+import {
+  constructSearchString,
+  isPipelineSelected,
+  raiseErrorToast,
+} from "utils/helpers";
 
 const SMART_TAG_WIDTH = 30;
 
@@ -73,6 +106,7 @@ const useStyles = makeStyles((theme) => ({
   gridHeaderActions: {
     display: "flex",
     flexDirection: "row",
+    justifyContent: "space-between",
   },
   searchContainer: {
     marginLeft: theme.spacing(2),
@@ -93,9 +127,6 @@ const useStyles = makeStyles((theme) => ({
     lineHeight: "normal",
     whiteSpace: "normal",
   },
-  exportButton: {
-    marginLeft: "auto",
-  },
   filterIcon: {
     marginLeft: theme.spacing(1),
     width: 18,
@@ -109,6 +140,7 @@ type Props = {
   datasetInfo?: DatasetInfoResponse;
   datasetSplitName: DatasetSplitName;
   confusionMatrix: QueryConfusionMatrixState;
+  details: QueryDetailsState;
   filters: QueryFilterState;
   pagination: QueryPaginationState;
   pipeline: QueryPipelineState;
@@ -120,6 +152,7 @@ const UtterancesTable: React.FC<Props> = ({
   datasetInfo,
   datasetSplitName,
   confusionMatrix,
+  details,
   filters,
   pagination,
   pipeline,
@@ -129,6 +162,8 @@ const UtterancesTable: React.FC<Props> = ({
   const classes = useStyles();
 
   const { page = 1, sort, descending } = pagination;
+  const offset = (page - 1) * PAGE_SIZE;
+  const { detailsForPageItem } = details;
 
   const getUtterancesQueryState = {
     jobId,
@@ -137,13 +172,18 @@ const UtterancesTable: React.FC<Props> = ({
     sort,
     descending,
     limit: PAGE_SIZE,
-    offset: (page - 1) * PAGE_SIZE,
+    offset,
     ...pipeline,
     ...postprocessing,
   };
 
-  const { data: utterancesResponse, isFetching } =
-    getUtterancesEndpoint.useQuery(getUtterancesQueryState);
+  const {
+    data: utterancesResponse,
+    isFetching,
+    error,
+  } = getUtterancesEndpoint.useQuery(getUtterancesQueryState);
+
+  const [updateDataAction] = updateDataActionsEndpoint.useMutation();
 
   const rows: Row[] = React.useMemo(
     () =>
@@ -164,35 +204,43 @@ const UtterancesTable: React.FC<Props> = ({
   // If config was undefined, PipelineCheck would not even render the page.
   if (config === undefined) return null;
 
-  const handlePageChange = (page: number) => {
-    const q = constructSearchString({
-      ...confusionMatrix,
-      ...filters,
-      ...pagination,
-      ...pipeline,
-      ...postprocessing,
-      page: page + 1,
-    });
-    history.push(`/${jobId}/dataset_splits/${datasetSplitName}/utterances${q}`);
-  };
+  const getUpdatedLocation = (update: Partial<QueryState>) =>
+    `/${jobId}/dataset_splits/${datasetSplitName}/utterances${constructSearchString(
+      {
+        ...confusionMatrix,
+        ...filters,
+        ...pagination,
+        ...pipeline,
+        ...postprocessing,
+        ...update,
+      }
+    )}`;
+
+  const getToDetails = (i: number) =>
+    0 <= i && i < utterancesResponse!.utteranceCount
+      ? getUpdatedLocation({
+          detailsForPageItem: i % PAGE_SIZE,
+          page: Math.floor(i / PAGE_SIZE) + 1,
+        })
+      : "";
+
+  const handlePageChange = (page: number) =>
+    history.push(getUpdatedLocation({ page: page + 1 }));
 
   const handleSortModelChange = ([model]:
     | GridSortItem[]
     | [GridSortItem]
     | []) =>
     history.push(
-      `/${jobId}/dataset_splits/${datasetSplitName}/utterances${constructSearchString(
-        {
-          ...confusionMatrix,
-          ...filters,
-          ...pagination,
-          ...pipeline,
-          ...postprocessing,
-          sort: model?.field as UtterancesSortableColumn | undefined,
-          descending: model?.sort === "desc" || undefined,
-        }
-      )}`
+      getUpdatedLocation({
+        sort: model?.field as UtterancesSortableColumn | undefined,
+        descending: model?.sort === "desc" || undefined,
+      })
     );
+
+  const toCloseDetails = getUpdatedLocation({ detailsForPageItem: undefined });
+
+  const handleCloseDetails = () => history.push(toCloseDetails);
 
   const smartTagFamilies = isPipelineSelected(pipeline)
     ? SMART_TAG_FAMILIES
@@ -389,11 +437,34 @@ const UtterancesTable: React.FC<Props> = ({
     },
   ];
 
-  const searchString = constructSearchString(pipeline);
+  const importProposedActions = (text: string) => {
+    const [header, ...rows] = text.trimEnd().split(/\r?\n/);
+    if (rows.length === 0) {
+      raiseErrorToast("There are no records in the CSV file.");
+      return;
+    }
+    if (header !== `${config.columns.persistent_id},proposed_action`) {
+      raiseErrorToast(
+        `The CSV file must have column headers ${config.columns.persistent_id} and proposed_action, in that order.`
+      );
+      return;
+    }
+
+    const body = rows.map((row) => {
+      const [persistentId, dataAction] = row.split(",");
+      return { persistentId, dataAction } as UtterancePatch;
+    });
+    updateDataAction({
+      ignoreNotFound: true,
+      body,
+      ...getUtterancesQueryState,
+    });
+  };
+
   const RowLink = (props: RowProps<Row>) => (
     <Link
       style={{ color: "unset", textDecoration: "unset" }}
-      to={`/${jobId}/dataset_splits/${datasetSplitName}/utterances/${props.row.index}${searchString}`}
+      to={getUpdatedLocation({ detailsForPageItem: props.index })}
     >
       <GridRow {...props} />
     </Link>
@@ -406,53 +477,62 @@ const UtterancesTable: React.FC<Props> = ({
           text="Explore utterances and propose actions. Click on a row to inspect the utterance details."
           link="user-guide/exploration-space/utterance-table/"
         />
-        <Button
-          id="export-button"
-          aria-controls="export-menu"
-          aria-haspopup="true"
-          className={classes.exportButton}
-          onClick={(event) => setAnchorEl(event.currentTarget)}
-          startIcon={<GetApp />}
-          endIcon={<ArrowDropDown />}
-        >
-          Export
-        </Button>
-        <Menu
-          id="export-menu"
-          anchorEl={anchorEl}
-          keepMounted
-          open={Boolean(anchorEl)}
-          onClose={() => setAnchorEl(null)}
-        >
-          <MenuItem
-            onClick={() => {
-              downloadDatasetSplit({
-                jobId,
-                datasetSplitName,
-                ...filters,
-                ...pipeline,
-              });
-              setAnchorEl(null);
-            }}
+        <Box display="flex" alignItems="center" gap={2}>
+          <FileInputButton
+            accept=".csv"
+            startIcon={<Upload />}
+            onFileRead={importProposedActions}
           >
-            Export utterances
-          </MenuItem>
-          <MenuItem
-            onClick={() => {
-              downloadUtteranceProposedActions({
-                jobId,
-                datasetSplitName,
-              });
-              setAnchorEl(null);
-            }}
+            Import
+          </FileInputButton>
+          <Button
+            id="export-button"
+            aria-controls="export-menu"
+            aria-haspopup="true"
+            onClick={(event) => setAnchorEl(event.currentTarget)}
+            startIcon={<Download />}
+            endIcon={<ArrowDropDown />}
           >
-            Export proposed actions
-          </MenuItem>
-        </Menu>
+            Export
+          </Button>
+          <Menu
+            id="export-menu"
+            anchorEl={anchorEl}
+            keepMounted
+            open={Boolean(anchorEl)}
+            onClose={() => setAnchorEl(null)}
+          >
+            <MenuItem
+              onClick={() => {
+                downloadDatasetSplit({
+                  jobId,
+                  datasetSplitName,
+                  ...filters,
+                  ...pipeline,
+                });
+                setAnchorEl(null);
+              }}
+            >
+              Export utterances
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                downloadUtteranceProposedActions({
+                  jobId,
+                  datasetSplitName,
+                });
+                setAnchorEl(null);
+              }}
+            >
+              Export proposed actions
+            </MenuItem>
+          </Menu>
+        </Box>
       </div>
       <Table
         pagination
         loading={isFetching}
+        error={error}
         rows={rows}
         columns={columns}
         columnVisibilityModel={
@@ -490,6 +570,65 @@ const UtterancesTable: React.FC<Props> = ({
           },
         }}
       />
+      <Dialog
+        open={detailsForPageItem !== undefined}
+        onClose={handleCloseDetails}
+        maxWidth="xl"
+        fullWidth
+        sx={{ [`& .${dialogClasses.paper}`]: { height: "inherit" } }} // the equivalent of fullWidth, but for height
+      >
+        <DialogTitle>
+          Utterance Details
+          <Box
+            position="absolute"
+            right={(theme) => theme.spacing(2)}
+            top={(theme) => theme.spacing(2)}
+          >
+            {!isFetching &&
+              utterancesResponse &&
+              detailsForPageItem !== undefined &&
+              detailsForPageItem in utterancesResponse.utterances && (
+                <IconButton
+                  size="small"
+                  component={Link}
+                  to={`/${jobId}/dataset_splits/${datasetSplitName}/utterances/${
+                    utterancesResponse.utterances[detailsForPageItem].index
+                  }${constructSearchString(pipeline)}`}
+                >
+                  <Fullscreen />
+                </IconButton>
+              )}
+            <IconButton size="small" component={Link} to={toCloseDetails}>
+              <Close />
+            </IconButton>
+          </Box>
+        </DialogTitle>
+        <DialogContent>
+          {detailsForPageItem !== undefined &&
+            (isFetching ? (
+              <Loading />
+            ) : utterancesResponse === undefined ? (
+              <DialogContentText>
+                {error?.message || UNKNOWN_ERROR}
+              </DialogContentText>
+            ) : !(detailsForPageItem in utterancesResponse.utterances) ? (
+              <DialogContentText>Invalid URL</DialogContentText>
+            ) : (
+              <UtteranceDetails
+                jobId={jobId}
+                index={utterancesResponse.utterances[detailsForPageItem].index}
+                datasetSplitName={datasetSplitName}
+                getUtterancesQueryState={getUtterancesQueryState}
+                utterance={utterancesResponse.utterances[detailsForPageItem]}
+                confidenceThreshold={utterancesResponse.confidenceThreshold}
+                arrows={{
+                  toPrevious: getToDetails(offset + detailsForPageItem - 1),
+                  toNext: getToDetails(offset + detailsForPageItem + 1),
+                }}
+              />
+            ))}
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 };

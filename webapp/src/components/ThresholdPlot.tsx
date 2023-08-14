@@ -1,10 +1,10 @@
 import { Info } from "@mui/icons-material";
 import {
-  alpha,
   Box,
   CircularProgress,
   Tooltip,
   Typography,
+  alpha,
 } from "@mui/material";
 import makeStyles from "@mui/styles/makeStyles";
 import React from "react";
@@ -167,6 +167,7 @@ const ThresholdPlot: React.FC<Props> = ({ jobId, pipeline }) => {
         gridTemplateRows={`[start] repeat(${yIntervals}, [tick] 1fr) [tick end label] auto [title] auto`}
         height="100%"
         marginTop={2}
+        minHeight={0}
         maxHeight={600}
         maxWidth={1000}
         width="100%"
